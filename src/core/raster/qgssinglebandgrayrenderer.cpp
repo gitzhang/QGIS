@@ -21,23 +21,22 @@
 #include <QDomDocument>
 #include <QDomElement>
 #include <QImage>
+#include <QColor>
+#include <memory>
 
-QgsSingleBandGrayRenderer::QgsSingleBandGrayRenderer( QgsRasterInterface* input, int grayBand ):
-    QgsRasterRenderer( input, "singlebandgray" ), mGrayBand( grayBand ), mGradient( BlackToWhite ), mContrastEnhancement( 0 )
+QgsSingleBandGrayRenderer::QgsSingleBandGrayRenderer( QgsRasterInterface *input, int grayBand )
+  : QgsRasterRenderer( input, QStringLiteral( "singlebandgray" ) )
+  , mGrayBand( grayBand )
+  , mGradient( BlackToWhite )
+  , mContrastEnhancement( nullptr )
 {
 }
 
-QgsSingleBandGrayRenderer::~QgsSingleBandGrayRenderer()
+QgsSingleBandGrayRenderer *QgsSingleBandGrayRenderer::clone() const
 {
-  delete mContrastEnhancement;
-}
+  QgsSingleBandGrayRenderer *renderer = new QgsSingleBandGrayRenderer( nullptr, mGrayBand );
+  renderer->copyCommonProperties( this );
 
-QgsRasterInterface * QgsSingleBandGrayRenderer::clone() const
-{
-  QgsSingleBandGrayRenderer * renderer = new QgsSingleBandGrayRenderer( 0, mGrayBand );
-  renderer->setOpacity( mOpacity );
-  renderer->setAlphaBand( mAlphaBand );
-  renderer->setRasterTransparency( mRasterTransparency );
   renderer->setGradient( mGradient );
   if ( mContrastEnhancement )
   {
@@ -46,69 +45,65 @@ QgsRasterInterface * QgsSingleBandGrayRenderer::clone() const
   return renderer;
 }
 
-QgsRasterRenderer* QgsSingleBandGrayRenderer::create( const QDomElement& elem, QgsRasterInterface* input )
+QgsRasterRenderer *QgsSingleBandGrayRenderer::create( const QDomElement &elem, QgsRasterInterface *input )
 {
   if ( elem.isNull() )
   {
-    return 0;
+    return nullptr;
   }
 
-  int grayBand = elem.attribute( "grayBand", "-1" ).toInt();
-  QgsSingleBandGrayRenderer* r = new QgsSingleBandGrayRenderer( input, grayBand );
-  r->readXML( elem );
+  int grayBand = elem.attribute( QStringLiteral( "grayBand" ), QStringLiteral( "-1" ) ).toInt();
+  QgsSingleBandGrayRenderer *r = new QgsSingleBandGrayRenderer( input, grayBand );
+  r->readXml( elem );
 
-  if ( elem.attribute( "gradient" ) == "WhiteToBlack" )
+  if ( elem.attribute( QStringLiteral( "gradient" ) ) == QLatin1String( "WhiteToBlack" ) )
   {
     r->setGradient( WhiteToBlack );  // BlackToWhite is default
   }
 
-  QDomElement contrastEnhancementElem = elem.firstChildElement( "contrastEnhancement" );
+  QDomElement contrastEnhancementElem = elem.firstChildElement( QStringLiteral( "contrastEnhancement" ) );
   if ( !contrastEnhancementElem.isNull() )
   {
-    QgsContrastEnhancement* ce = new QgsContrastEnhancement(( QGis::DataType )(
-          input->dataType( grayBand ) ) ) ;
-    ce->readXML( contrastEnhancementElem );
+    QgsContrastEnhancement *ce = new QgsContrastEnhancement( ( Qgis::DataType )(
+          input->dataType( grayBand ) ) );
+    ce->readXml( contrastEnhancementElem );
     r->setContrastEnhancement( ce );
   }
   return r;
 }
 
-void QgsSingleBandGrayRenderer::setContrastEnhancement( QgsContrastEnhancement* ce )
+void QgsSingleBandGrayRenderer::setContrastEnhancement( QgsContrastEnhancement *ce )
 {
-  delete mContrastEnhancement;
-  mContrastEnhancement = ce;
+  mContrastEnhancement.reset( ce );
 }
 
-QgsRasterBlock* QgsSingleBandGrayRenderer::block( int bandNo, QgsRectangle  const & extent, int width, int height )
+QgsRasterBlock *QgsSingleBandGrayRenderer::block( int bandNo, const QgsRectangle &extent, int width, int height, QgsRasterBlockFeedback *feedback )
 {
-  Q_UNUSED( bandNo );
-  QgsDebugMsg( QString( "width = %1 height = %2" ).arg( width ).arg( height ) );
+  Q_UNUSED( bandNo )
+  QgsDebugMsgLevel( QStringLiteral( "width = %1 height = %2" ).arg( width ).arg( height ), 4 );
 
-  QgsRasterBlock *outputBlock = new QgsRasterBlock();
+  std::unique_ptr< QgsRasterBlock > outputBlock( new QgsRasterBlock() );
   if ( !mInput )
   {
-    return outputBlock;
+    return outputBlock.release();
   }
 
-  QgsRasterBlock *inputBlock = mInput->block( mGrayBand, extent, width, height );
+  std::shared_ptr< QgsRasterBlock > inputBlock( mInput->block( mGrayBand, extent, width, height, feedback ) );
   if ( !inputBlock || inputBlock->isEmpty() )
   {
-    QgsDebugMsg( "No raster data!" );
-    delete inputBlock;
-    return outputBlock;
+    QgsDebugMsg( QStringLiteral( "No raster data!" ) );
+    return outputBlock.release();
   }
 
-  QgsRasterBlock *alphaBlock = 0;
+  std::shared_ptr< QgsRasterBlock > alphaBlock;
 
   if ( mAlphaBand > 0 && mGrayBand != mAlphaBand )
   {
-    alphaBlock = mInput->block( mAlphaBand, extent, width, height );
+    alphaBlock.reset( mInput->block( mAlphaBand, extent, width, height, feedback ) );
     if ( !alphaBlock || alphaBlock->isEmpty() )
     {
       // TODO: better to render without alpha
-      delete inputBlock;
-      delete alphaBlock;
-      return outputBlock;
+      return outputBlock.release();
     }
   }
   else if ( mAlphaBand > 0 )
@@ -116,22 +111,22 @@ QgsRasterBlock* QgsSingleBandGrayRenderer::block( int bandNo, QgsRectangle  cons
     alphaBlock = inputBlock;
   }
 
-  if ( !outputBlock->reset( QGis::ARGB32_Premultiplied, width, height ) )
+  if ( !outputBlock->reset( Qgis::ARGB32_Premultiplied, width, height ) )
   {
-    delete inputBlock;
-    delete alphaBlock;
-    return outputBlock;
+    return outputBlock.release();
   }
 
-  QRgb myDefaultColor = NODATA_COLOR;
-  for ( size_t i = 0; i < ( size_t )width*height; i++ )
+  const QRgb myDefaultColor = renderColorForNodataPixel();
+  bool isNoData = false;
+  for ( qgssize i = 0; i < ( qgssize )width * height; i++ )
   {
-    if ( inputBlock->isNoData( i ) )
+    double grayVal = inputBlock->valueAndNoData( i, isNoData );
+
+    if ( isNoData )
     {
       outputBlock->setColor( i, myDefaultColor );
       continue;
     }
-    double grayVal = inputBlock->value( i );
 
     double currentAlpha = mOpacity;
     if ( mRasterTransparency )
@@ -168,53 +163,49 @@ QgsRasterBlock* QgsSingleBandGrayRenderer::block( int bandNo, QgsRectangle  cons
     }
   }
 
-  delete inputBlock;
-  if ( mAlphaBand > 0 && mGrayBand != mAlphaBand )
-  {
-    delete alphaBlock;
-  }
-
-  return outputBlock;
+  return outputBlock.release();
 }
 
-void QgsSingleBandGrayRenderer::writeXML( QDomDocument& doc, QDomElement& parentElem ) const
+void QgsSingleBandGrayRenderer::writeXml( QDomDocument &doc, QDomElement &parentElem ) const
 {
   if ( parentElem.isNull() )
   {
     return;
   }
 
-  QDomElement rasterRendererElem = doc.createElement( "rasterrenderer" );
-  _writeXML( doc, rasterRendererElem );
+  QDomElement rasterRendererElem = doc.createElement( QStringLiteral( "rasterrenderer" ) );
+  _writeXml( doc, rasterRendererElem );
 
-  rasterRendererElem.setAttribute( "grayBand", mGrayBand );
+  rasterRendererElem.setAttribute( QStringLiteral( "grayBand" ), mGrayBand );
 
   QString gradient;
   if ( mGradient == BlackToWhite )
   {
-    gradient = "BlackToWhite";
+    gradient = QStringLiteral( "BlackToWhite" );
   }
   else
   {
-    gradient = "WhiteToBlack";
+    gradient = QStringLiteral( "WhiteToBlack" );
   }
-  rasterRendererElem.setAttribute( "gradient", gradient );
+  rasterRendererElem.setAttribute( QStringLiteral( "gradient" ), gradient );
 
   if ( mContrastEnhancement )
   {
-    QDomElement contrastElem = doc.createElement( "contrastEnhancement" );
-    mContrastEnhancement->writeXML( doc, contrastElem );
+    QDomElement contrastElem = doc.createElement( QStringLiteral( "contrastEnhancement" ) );
+    mContrastEnhancement->writeXml( doc, contrastElem );
     rasterRendererElem.appendChild( contrastElem );
   }
   parentElem.appendChild( rasterRendererElem );
 }
 
-void QgsSingleBandGrayRenderer::legendSymbologyItems( QList< QPair< QString, QColor > >& symbolItems ) const
+void QgsSingleBandGrayRenderer::legendSymbologyItems( QList< QPair< QString, QColor > > &symbolItems ) const
 {
   if ( mContrastEnhancement && mContrastEnhancement->contrastEnhancementAlgorithm() != QgsContrastEnhancement::NoEnhancement )
   {
-    symbolItems.push_back( qMakePair( QString::number( mContrastEnhancement->minimumValue() ), QColor( 0, 0, 0 ) ) );
-    symbolItems.push_back( qMakePair( QString::number( mContrastEnhancement->maximumValue() ), QColor( 255, 255, 255 ) ) );
+    QColor minColor = ( mGradient == BlackToWhite ) ? Qt::black : Qt::white;
+    QColor maxColor = ( mGradient == BlackToWhite ) ? Qt::white : Qt::black;
+    symbolItems.push_back( qMakePair( QString::number( mContrastEnhancement->minimumValue() ), minColor ) );
+    symbolItems.push_back( qMakePair( QString::number( mContrastEnhancement->maximumValue() ), maxColor ) );
   }
 }
 
@@ -226,4 +217,155 @@ QList<int> QgsSingleBandGrayRenderer::usesBands() const
     bandList << mGrayBand;
   }
   return bandList;
+}
+
+void QgsSingleBandGrayRenderer::toSld( QDomDocument &doc, QDomElement &element, const QgsStringMap &props ) const
+{
+  // create base structure
+  QgsRasterRenderer::toSld( doc, element, props );
+
+  // look for RasterSymbolizer tag
+  QDomNodeList elements = element.elementsByTagName( QStringLiteral( "sld:RasterSymbolizer" ) );
+  if ( elements.size() == 0 )
+    return;
+
+  // there SHOULD be only one
+  QDomElement rasterSymbolizerElem = elements.at( 0 ).toElement();
+
+  // add Channel Selection tags
+  // Need to insert channelSelection in the correct sequence as in SLD standard e.g.
+  // after opacity or geometry or as first element after sld:RasterSymbolizer
+  QDomElement channelSelectionElem = doc.createElement( QStringLiteral( "sld:ChannelSelection" ) );
+  elements = rasterSymbolizerElem.elementsByTagName( QStringLiteral( "sld:Opacity" ) );
+  if ( elements.size() != 0 )
+  {
+    rasterSymbolizerElem.insertAfter( channelSelectionElem, elements.at( 0 ) );
+  }
+  else
+  {
+    elements = rasterSymbolizerElem.elementsByTagName( QStringLiteral( "sld:Geometry" ) );
+    if ( elements.size() != 0 )
+    {
+      rasterSymbolizerElem.insertAfter( channelSelectionElem, elements.at( 0 ) );
+    }
+    else
+    {
+      rasterSymbolizerElem.insertBefore( channelSelectionElem, rasterSymbolizerElem.firstChild() );
+    }
+  }
+
+  // for gray band
+  QDomElement channelElem = doc.createElement( QStringLiteral( "sld:GrayChannel" ) );
+  channelSelectionElem.appendChild( channelElem );
+
+  // set band
+  QDomElement sourceChannelNameElem = doc.createElement( QStringLiteral( "sld:SourceChannelName" ) );
+  sourceChannelNameElem.appendChild( doc.createTextNode( QString::number( grayBand() ) ) );
+  channelElem.appendChild( sourceChannelNameElem );
+
+  // set ContrastEnhancement
+  if ( contrastEnhancement() )
+  {
+    QDomElement contrastEnhancementElem = doc.createElement( QStringLiteral( "sld:ContrastEnhancement" ) );
+    contrastEnhancement()->toSld( doc, contrastEnhancementElem );
+
+    // do changes to minValue/maxValues depending on stretching algorithm. This is necessary because
+    // geoserver does a first stretch on min/max, then applies color map rules.
+    // In some combination it is necessary to use real min/max values and in
+    // others the actual edited min/max values
+    switch ( contrastEnhancement()->contrastEnhancementAlgorithm() )
+    {
+      case QgsContrastEnhancement::StretchAndClipToMinimumMaximum:
+      case QgsContrastEnhancement::ClipToMinimumMaximum:
+      {
+        // with this renderer export have to be check against real min/max values of the raster
+        QgsRasterBandStats myRasterBandStats = mInput->bandStatistics( grayBand(), QgsRasterBandStats::Min | QgsRasterBandStats::Max );
+
+        // if minimum range differ from the real minimum => set is in exported SLD vendor option
+        if ( !qgsDoubleNear( contrastEnhancement()->minimumValue(), myRasterBandStats.minimumValue ) )
+        {
+          // look for VendorOption tag to look for that with minValue attribute
+          const QDomNodeList vendorOptions = contrastEnhancementElem.elementsByTagName( QStringLiteral( "sld:VendorOption" ) );
+          for ( int i = 0; i < vendorOptions.size(); ++i )
+          {
+            QDomElement vendorOption = vendorOptions.at( i ).toElement();
+            if ( vendorOption.attribute( QStringLiteral( "name" ) ) != QStringLiteral( "minValue" ) )
+              continue;
+
+            // remove old value and add the new one
+            vendorOption.removeChild( vendorOption.firstChild() );
+            vendorOption.appendChild( doc.createTextNode( QString::number( myRasterBandStats.minimumValue ) ) );
+          }
+        }
+        break;
+      }
+      case QgsContrastEnhancement::UserDefinedEnhancement:
+        break;
+      case QgsContrastEnhancement::NoEnhancement:
+        break;
+      case QgsContrastEnhancement::StretchToMinimumMaximum:
+        break;
+    }
+
+    channelElem.appendChild( contrastEnhancementElem );
+  }
+
+  // for each color set a ColorMapEntry tag nested into "sld:ColorMap" tag
+  // e.g. <ColorMapEntry color="#EEBE2F" quantity="-300" label="label" opacity="0"/>
+  QList< QPair< QString, QColor > > classes;
+  legendSymbologyItems( classes );
+
+  // add ColorMap tag
+  QDomElement colorMapElem = doc.createElement( QStringLiteral( "sld:ColorMap" ) );
+  rasterSymbolizerElem.appendChild( colorMapElem );
+
+  // TODO: add clip intervals basing on real min/max without trigger
+  // min/max calculation again that can takes a lot for remote or big images
+  //
+  // contrast enhancement against a color map can be SLD simulated playing with ColorMapEntryies
+  // each ContrastEnhancementAlgorithm need a specific management.
+  // set type of ColorMap ramp [ramp, intervals, values]
+  // basing on interpolation algorithm of the raster shader
+  QList< QPair< QString, QColor > > colorMapping( classes );
+  switch ( contrastEnhancement()->contrastEnhancementAlgorithm() )
+  {
+    case ( QgsContrastEnhancement::StretchAndClipToMinimumMaximum ):
+    case ( QgsContrastEnhancement::ClipToMinimumMaximum ):
+    {
+      QString lowValue = classes[0].first;
+      QColor lowColor = classes[0].second;
+      lowColor.setAlpha( 0 );
+      QString highValue = classes[1].first;
+      QColor highColor = classes[1].second;
+      highColor.setAlpha( 0 );
+
+      colorMapping.prepend( QPair< QString, QColor >( lowValue, lowColor ) );
+      colorMapping.append( QPair< QString, QColor >( highValue, highColor ) );
+      break;
+    }
+    case ( QgsContrastEnhancement::StretchToMinimumMaximum ):
+    {
+      colorMapping[0].first = QStringLiteral( "0" );
+      colorMapping[1].first = QStringLiteral( "255" );
+      break;
+    }
+    case ( QgsContrastEnhancement::UserDefinedEnhancement ):
+      break;
+    case ( QgsContrastEnhancement::NoEnhancement ):
+      break;
+  }
+
+  // create tags
+  for ( auto it = colorMapping.constBegin(); it != colorMapping.constEnd() ; ++it )
+  {
+    // set low level color mapping
+    QDomElement lowColorMapEntryElem = doc.createElement( QStringLiteral( "sld:ColorMapEntry" ) );
+    colorMapElem.appendChild( lowColorMapEntryElem );
+    lowColorMapEntryElem.setAttribute( QStringLiteral( "color" ), it->second.name() );
+    lowColorMapEntryElem.setAttribute( QStringLiteral( "quantity" ), it->first );
+    if ( it->second.alphaF() == 0.0 )
+    {
+      lowColorMapEntryElem.setAttribute( QStringLiteral( "opacity" ), QString::number( it->second.alpha() ) );
+    }
+  }
 }

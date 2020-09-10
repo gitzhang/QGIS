@@ -25,42 +25,51 @@
 
 #include <QString>
 
+#include "qgsprovidermetadata.h"
+
 /**
-
-  \brief Data provider for GDAL layers.
-
-  This provider implements the interface defined in the QgsDataProvider class
-  to provide access to spatial data residing in a GDAL layers.
-
+ *
+ * \brief Data provider for OWS layers.
+ *
+ * This provider implements the interface defined in the QgsDataProvider class
+ * to provide access to spatial data residing in a OWS layers.
+ *
 */
 class QgsOwsProvider : public QgsDataProvider
 {
     Q_OBJECT
 
   public:
-    /**
-    * Constructor for the provider.
-    *
-    * \param   uri   HTTP URL of the Web Server.  If needed a proxy will be used
-    *                otherwise we contact the host directly.
-    *
-    */
-    QgsOwsProvider( QString const & uri = 0 );
 
-    //! Destructor
-    ~QgsOwsProvider();
+    /**
+     * Constructor for the provider.
+     *
+     * \param   uri   HTTP URL of the Web Server.  If needed a proxy will be used
+     *                otherwise we contact the host directly.
+     * \param options generic data provider options
+     *
+     */
+    explicit QgsOwsProvider( const QString &uri, const QgsDataProvider::ProviderOptions &providerOptions );
 
     /* Pure virtuals */
 
-    QString name() const;
+    QString name() const override;
 
-    QString description() const;
+    QString description() const override;
 
-    QgsCoordinateReferenceSystem crs() { return QgsCoordinateReferenceSystem(); }
+    QgsCoordinateReferenceSystem crs() const override { return QgsCoordinateReferenceSystem(); }
 
-    QgsRectangle extent() { return QgsRectangle(); }
+    QgsRectangle extent() const override { return QgsRectangle(); }
 
-    bool isValid() { return false; }
+    bool isValid() const override { return false; }
+};
+
+class QgsOwsProviderMetadata: public QgsProviderMetadata
+{
+  public:
+    QgsOwsProviderMetadata();
+    QgsOwsProvider *createProvider( const QString &uri, const QgsDataProvider::ProviderOptions &options ) override;
+    QList< QgsDataItemProvider * > dataItemProviders() const override;
 };
 
 #endif // QGSOWSPROVIDER_H

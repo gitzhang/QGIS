@@ -17,63 +17,123 @@
 #ifndef QGSATTRIBUTEDIALOG_H
 #define QGSATTRIBUTEDIALOG_H
 
-#include "qgsfeature.h"
+#include "qgsattributeeditorcontext.h"
+#include "qgis_sip.h"
+#include "qgsattributeform.h"
+#include "qgstrackedvectorlayertools.h"
+#include "qgsactionmenu.h"
 
-class QDialog;
-class QgsFeature;
-class QLayout;
-class QgsField;
-class QgsVectorLayer;
+#include <QDialog>
+#include <QMenuBar>
+#include <QGridLayout>
+#include "qgis_gui.h"
+
 class QgsHighlight;
-class QgsDistanceArea;
 
-class GUI_EXPORT QgsAttributeDialog : public QObject
+/**
+ * \ingroup gui
+ * \class QgsAttributeDialog
+ */
+class GUI_EXPORT QgsAttributeDialog : public QDialog
 {
     Q_OBJECT
 
   public:
-    QgsAttributeDialog( QgsVectorLayer *vl, QgsFeature *thepFeature, bool featureOwner, QgsDistanceArea myDa, QWidget* parent = 0, bool showDialogButtons = true );
-    ~QgsAttributeDialog();
 
-    /** Saves the size and position for the next time
-     *  this dialog box was used.
+    /**
+     * Create an attribute dialog for a given layer and feature
+     *
+     * \param vl                The layer for which the dialog will be generated
+     * \param thepFeature       A feature for which the dialog will be generated
+     * \param featureOwner      Set to TRUE, if the dialog should take ownership of the feature
+     * \param parent            A parent widget for the dialog
+     * \param showDialogButtons TRUE: Show the dialog buttons accept/cancel
+     * \param context           The context in which this dialog is created
+     *
      */
-    void saveGeometry();
+    QgsAttributeDialog( QgsVectorLayer *vl, QgsFeature *thepFeature, bool featureOwner, QWidget *parent SIP_TRANSFERTHIS = nullptr, bool showDialogButtons = true, const QgsAttributeEditorContext &context = QgsAttributeEditorContext() );
 
-    /** Restores the size and position from the last time
-     *  this dialog box was used.
+    ~QgsAttributeDialog() override;
+
+    /**
+     * \brief setHighlight
+     * \param h The highlight. Ownership is taken.
      */
-    void restoreGeometry();
-
     void setHighlight( QgsHighlight *h );
 
-    QDialog *dialog() { return mDialog; }
+    QgsAttributeForm *attributeForm() { return mAttributeForm; }
 
-    QgsFeature* feature() { return mFeature; }
+    const QgsFeature *feature() { return &mAttributeForm->feature(); }
+
+    /**
+     * Is this dialog editable?
+     *
+     * \returns returns TRUE, if this dialog was created in an editable manner.
+     */
+    bool editable() { return mAttributeForm->editable(); }
+
+    /**
+     * Toggles the form mode.
+     * \param mode form mode. For example, if set to QgsAttributeEditorContext::AddFeatureMode, the dialog will be editable even with an invalid feature and
+     * will add a new feature when the form is accepted.
+     */
+    void setMode( QgsAttributeEditorContext::Mode mode );
+
+    /**
+     * Sets the edit command message (Undo) that will be used when the dialog is accepted
+     *
+     * \param message The message
+     */
+    void setEditCommandMessage( const QString &message ) { mAttributeForm->setEditCommandMessage( message ); }
+
+    /**
+     * Intercept window activate/deactivate events to show/hide the highlighted feature.
+     *
+     * \param e The event
+     *
+     * \returns The same as the parent QDialog
+     */
+    bool event( QEvent *e ) override;
+
+    /**
+     * Sets \a extraScope as an additional expression context scope to be used
+     * for calculations in this form.
+     *
+     * \since QGIS 3.16
+     */
+    void setExtraContextScope( QgsExpressionContextScope *extraScope SIP_TRANSFER );
 
   public slots:
-    void accept();
+    void accept() override;
+    void reject() override;
 
-    int exec();
+    //! Show the dialog non-blocking. Reparents this dialog to be a child of the dialog form
     void show();
 
-    void dialogDestroyed();
-
   private:
-    bool eventFilter( QObject *obj, QEvent *event );
+    void init( QgsVectorLayer *layer, QgsFeature *feature, const QgsAttributeEditorContext &context, bool showDialogButtons );
 
-    QDialog *mDialog;
     QString mSettingsPath;
     // Used to sync multiple widgets for the same field
-    QMap<int, QWidget*> mProxyWidgets;
-    QgsVectorLayer *mLayer;
-    QgsFeature *mFeature;
-    bool mFeatureOwner;
-    QgsHighlight *mHighlight;
+    QgsHighlight *mHighlight = nullptr;
     int mFormNr;
-    static int smFormCounter;
     bool mShowDialogButtons;
     QString mReturnvarname;
+    QgsAttributeForm *mAttributeForm = nullptr;
+    QgsFeature *mOwnedFeature = nullptr;
+    QgsMessageBar *mMessageBar = nullptr;
+
+    QgsTrackedVectorLayerTools mTrackedVectorLayerTools;
+
+    // true if this dialog is editable
+    bool mEditable;
+
+    QgsActionMenu *mMenu;
+
+    static int sFormCounter;
+
+    void saveGeometry();
+    void restoreGeometry();
 };
 
 #endif

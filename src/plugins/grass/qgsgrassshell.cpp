@@ -12,9 +12,11 @@
  *   (at your option) any later version.                                   *
  *                                                                         *
  ***************************************************************************/
+#include <QEvent>
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QShortcut>
+#include <QKeyEvent>
 #include <QKeySequence>
 
 #include "qgslogger.h"
@@ -23,6 +25,7 @@
 #include "qgsgrass.h"
 #include "qgsconfig.h"
 
+#include "qgsgrassutils.h"
 #include "qgsgrassshell.h"
 
 extern "C"
@@ -31,11 +34,13 @@ extern "C"
 }
 
 QgsGrassShell::QgsGrassShell( QgsGrassTools *tools, QTabWidget *parent, const char *name )
-    : QFrame( parent ), mTools( tools ), mTabWidget( parent )
+  : QFrame( parent )
+  , mTools( tools )
+  , mTabWidget( parent )
 {
-  Q_UNUSED( name );
+  Q_UNUSED( name )
   QVBoxLayout *mainLayout = new QVBoxLayout( this );
-  QTermWidget *mTerminal = new QTermWidget( 0, this );
+  mTerminal = new QTermWidget( 0, this );
   initTerminal( mTerminal );
   QShortcut *pasteShortcut = new QShortcut( QKeySequence( tr( "Ctrl+Shift+V" ) ), mTerminal );
   QShortcut *copyShortcut = new QShortcut( QKeySequence( tr( "Ctrl+Shift+C" ) ), mTerminal );
@@ -43,9 +48,9 @@ QgsGrassShell::QgsGrassShell( QgsGrassTools *tools, QTabWidget *parent, const ch
   mainLayout->addWidget( mTerminal );
   setLayout( mainLayout );
 
-  connect( mTerminal, SIGNAL( finished() ), this, SLOT( closeShell() ) );
-  connect( pasteShortcut, SIGNAL( activated() ), mTerminal, SLOT( pasteClipboard() ) );
-  connect( copyShortcut, SIGNAL( activated() ), mTerminal, SLOT( copyClipboard() ) );
+  connect( mTerminal, &QTermWidget::finished, this, &QgsGrassShell::closeShell );
+  connect( pasteShortcut, &QShortcut::activated, mTerminal, &QTermWidget::pasteClipboard );
+  connect( copyShortcut, &QShortcut::activated, mTerminal, &QTermWidget::copyClipboard );
 
 #if 0
   // TODO: find a better way to manage the lockfile.
@@ -59,13 +64,36 @@ QgsGrassShell::QgsGrassShell( QgsGrassTools *tools, QTabWidget *parent, const ch
 #endif
 
   mTerminal->setSize( 80, 25 );
-  mTerminal->setColorScheme( COLOR_SCHEME_BLACK_ON_WHITE );
+  //mTerminal->setColorScheme( COLOR_SCHEME_BLACK_ON_WHITE );
+  mTerminal->setColorScheme( QgsApplication::pkgDataPath() + "/grass/qtermwidget/color-schemes/BlackOnWhite.schema" );
   mTerminal->startShellProgram();
   mTerminal->setFocus( Qt::MouseFocusReason );
+
+  // QTermWidget does set default font family Monospace, size 10 via QWidget::setFont()
+  // but QWidget::setFont() does not guarantee to really change the font (see doc)
+  // setStyleSheet() works (it is applied to QTermWidget children TerminalDisplay)
+  mTerminal->setStyleSheet( QStringLiteral( "font-family: Monospace; font-size: 10pt;" ) );
 }
 
-QgsGrassShell::~QgsGrassShell()
+bool QgsGrassShell::event( QEvent *e )
 {
+  // We have to accept simple shortcuts, QGIS defines shortcuts without Ctrl/Shift for map tools,
+  // for example S for Enable Snapping. See #18262.
+  // See also QWidgetLineControl::processShortcutOverrideEvent and TerminalDisplay::handleShortcutOverrideEvent
+  if ( e->type() == QEvent::ShortcutOverride )
+  {
+    QKeyEvent *ke = static_cast<QKeyEvent *>( e );
+    if ( ke->modifiers() == Qt::NoModifier || ke->modifiers() == Qt::ShiftModifier
+         || ke->modifiers() == Qt::KeypadModifier )
+    {
+      if ( ke->key() < Qt::Key_Escape )
+      {
+        ke->accept();
+        return true;
+      }
+    }
+  }
+  return QFrame::event( e );
 }
 
 void QgsGrassShell::closeShell()
@@ -87,20 +115,27 @@ void QgsGrassShell::closeShell()
 
 void QgsGrassShell::initTerminal( QTermWidget *terminal )
 {
-  QStringList env( "" );
-  QStringList args( "" );
+  QStringList env( ( QString() ) );
+  QStringList args( ( QString() ) );
 
   // GRASS Init.sh should not be started here, it is either run when GRASS is started if QGIS is run from GRASS shell or everything (set environment variables and lock mapset) is done in QgsGrass::openMapset
   //QString shellProgram = QString( "%1/etc/Init.sh" ).arg( ::getenv( "GISBASE" ) );
 
   //terminal->setShellProgram( shellProgram );
-  env << "TERM=vt100";
-  env << "GISRC_MODE_MEMORY";
+
+  QString path = getenv( "PATH" );
+  path += QgsGrass::pathSeparator() + QgsGrass::grassModulesPaths().join( QgsGrass::pathSeparator() );
+  QgsDebugMsg( "path = " + path );
+
+  env << "PATH=" + path;
+  env << "PYTHONPATH=" + QgsGrass::getPythonPath();
+  env << QStringLiteral( "TERM=vt100" );
+  env << QStringLiteral( "GISRC_MODE_MEMORY" );
   // TODO: we should check if these environment variable were set by user before QGIS was started
-  env << "GRASS_HTML_BROWSER=" + QgsApplication::libexecPath() + "grass/bin/qgis.g.browser";
-  env << "GRASS_WISH=wish";
-  env << "GRASS_TCLSH=tclsh";
-  env << "GRASS_PYTHON=python";
+  env << "GRASS_HTML_BROWSER=" + QgsGrassUtils::htmlBrowserPath();
+  env << QStringLiteral( "GRASS_WISH=wish" );
+  env << QStringLiteral( "GRASS_TCLSH=tclsh" );
+  env << QStringLiteral( "GRASS_PYTHON=python" );
 
   //args << "-text";
   //args << QString( "%1/%2/%3" ).arg( QgsGrass::getDefaultGisdbase() ).arg( QgsGrass::getDefaultLocation() ).arg( QgsGrass::getDefaultMapset() );

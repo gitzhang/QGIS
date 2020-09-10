@@ -1,17 +1,31 @@
+/***************************************************************************
+    qgsfeatureselectionmodel.cpp
+    ---------------------
+    begin                : April 2013
+    copyright            : (C) 2013 by Matthias Kuhn
+    email                : matthias at opengis dot ch
+ ***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
 #include "qgsattributetablemodel.h"
 #include "qgsfeaturemodel.h"
+#include "qgsifeatureselectionmanager.h"
 #include "qgsfeatureselectionmodel.h"
 #include "qgsvectorlayer.h"
-#include <qdebug.h>
+#include "qgslogger.h"
 
-QgsFeatureSelectionModel::QgsFeatureSelectionModel( QAbstractItemModel* model, QgsFeatureModel* featureModel, QgsVectorLayer* layer, QObject* parent )
-    : QItemSelectionModel( model, parent )
-    , mFeatureModel( featureModel )
-    , mLayer( layer )
-    , mSyncEnabled( true )
-    , mClearAndSelectBuffer( false )
+QgsFeatureSelectionModel::QgsFeatureSelectionModel( QAbstractItemModel *model, QgsFeatureModel *featureModel, QgsIFeatureSelectionManager *featureSelectionManager, QObject *parent )
+  : QItemSelectionModel( model, parent )
+  , mFeatureModel( featureModel )
+  , mSyncEnabled( true )
+  , mClearAndSelectBuffer( false )
 {
-  connect( mLayer, SIGNAL( selectionChanged( QgsFeatureIds, QgsFeatureIds, bool ) ), this, SLOT( layerSelectionChanged( QgsFeatureIds, QgsFeatureIds, bool ) ) );
+  setFeatureSelectionManager( featureSelectionManager );
 }
 
 void QgsFeatureSelectionModel::enableSync( bool enable )
@@ -22,12 +36,12 @@ void QgsFeatureSelectionModel::enableSync( bool enable )
   {
     if ( mClearAndSelectBuffer )
     {
-      mLayer->setSelectedFeatures( mSelectedBuffer );
+      mFeatureSelectionManager->setSelectedFeatures( mSelectedBuffer );
     }
     else
     {
-      mLayer->select( mSelectedBuffer );
-      mLayer->deselect( mDeselectedBuffer );
+      mFeatureSelectionManager->select( mSelectedBuffer );
+      mFeatureSelectionManager->deselect( mDeselectedBuffer );
     }
 
     mSelectedBuffer.clear();
@@ -44,7 +58,7 @@ bool QgsFeatureSelectionModel::isSelected( QgsFeatureId fid )
   if ( mDeselectedBuffer.contains( fid ) )
     return false;
 
-  if ( !mClearAndSelectBuffer && mLayer->selectedFeaturesIds().contains( fid ) )
+  if ( !mClearAndSelectBuffer && mFeatureSelectionManager->selectedFeatureIds().contains( fid ) )
     return true;
 
   return false;
@@ -59,21 +73,25 @@ void QgsFeatureSelectionModel::selectFeatures( const QItemSelection &selection, 
 {
   QgsFeatureIds ids;
 
-  foreach ( const QModelIndex index, selection.indexes() )
+  QgsDebugMsg( QStringLiteral( "Index count: %1" ).arg( selection.indexes().size() ) );
+
+  const auto constIndexes = selection.indexes();
+  for ( const QModelIndex &index : constIndexes )
   {
     QgsFeatureId id = index.model()->data( index, QgsAttributeTableModel::FeatureIdRole ).toLongLong();
 
     ids << id;
   }
 
-  disconnect( mLayer, SIGNAL( selectionChanged( QgsFeatureIds, QgsFeatureIds, bool ) ), this, SLOT( layerSelectionChanged( QgsFeatureIds, QgsFeatureIds, bool ) ) );
+  disconnect( mFeatureSelectionManager, &QgsIFeatureSelectionManager::selectionChanged, this, &QgsFeatureSelectionModel::layerSelectionChanged );
 
   if ( command.testFlag( QItemSelectionModel::ClearAndSelect ) )
   {
     if ( !mSyncEnabled )
     {
       mClearAndSelectBuffer = true;
-      foreach ( QgsFeatureId id, ids )
+      const auto constIds = ids;
+      for ( QgsFeatureId id : constIds )
       {
         if ( !mDeselectedBuffer.remove( id ) )
         {
@@ -83,14 +101,15 @@ void QgsFeatureSelectionModel::selectFeatures( const QItemSelection &selection, 
     }
     else
     {
-      mLayer->setSelectedFeatures( ids );
+      mFeatureSelectionManager->setSelectedFeatures( ids );
     }
   }
   else if ( command.testFlag( QItemSelectionModel::Select ) )
   {
     if ( !mSyncEnabled )
     {
-      foreach ( QgsFeatureId id, ids )
+      const auto constIds = ids;
+      for ( QgsFeatureId id : constIds )
       {
         if ( !mDeselectedBuffer.remove( id ) )
         {
@@ -100,14 +119,15 @@ void QgsFeatureSelectionModel::selectFeatures( const QItemSelection &selection, 
     }
     else
     {
-      mLayer->select( ids );
+      mFeatureSelectionManager->select( ids );
     }
   }
   else if ( command.testFlag( QItemSelectionModel::Deselect ) )
   {
     if ( !mSyncEnabled )
     {
-      foreach ( QgsFeatureId id, ids )
+      const auto constIds = ids;
+      for ( QgsFeatureId id : constIds )
       {
         if ( !mSelectedBuffer.remove( id ) )
         {
@@ -117,14 +137,15 @@ void QgsFeatureSelectionModel::selectFeatures( const QItemSelection &selection, 
     }
     else
     {
-      mLayer->deselect( ids );
+      mFeatureSelectionManager->deselect( ids );
     }
   }
 
-  connect( mLayer, SIGNAL( selectionChanged( QgsFeatureIds, QgsFeatureIds, bool ) ), this, SLOT( layerSelectionChanged( QgsFeatureIds, QgsFeatureIds, bool ) ) );
+  connect( mFeatureSelectionManager, &QgsIFeatureSelectionManager::selectionChanged, this, &QgsFeatureSelectionModel::layerSelectionChanged );
 
   QModelIndexList updatedIndexes;
-  foreach ( QModelIndex idx, selection.indexes() )
+  const auto indexes = selection.indexes();
+  for ( const QModelIndex &idx : indexes )
   {
     updatedIndexes.append( expandIndexToRow( idx ) );
   }
@@ -132,7 +153,17 @@ void QgsFeatureSelectionModel::selectFeatures( const QItemSelection &selection, 
   emit requestRepaint( updatedIndexes );
 }
 
-void QgsFeatureSelectionModel::layerSelectionChanged( QgsFeatureIds selected, QgsFeatureIds deselected, bool clearAndSelect )
+void QgsFeatureSelectionModel::setFeatureSelectionManager( QgsIFeatureSelectionManager *featureSelectionManager )
+{
+  if ( mFeatureSelectionManager )
+    disconnect( mFeatureSelectionManager, &QgsIFeatureSelectionManager::selectionChanged, this, &QgsFeatureSelectionModel::layerSelectionChanged );
+
+  mFeatureSelectionManager = featureSelectionManager;
+
+  connect( mFeatureSelectionManager, &QgsIFeatureSelectionManager::selectionChanged, this, &QgsFeatureSelectionModel::layerSelectionChanged );
+}
+
+void QgsFeatureSelectionModel::layerSelectionChanged( const QgsFeatureIds &selected, const QgsFeatureIds &deselected, bool clearAndSelect )
 {
   if ( clearAndSelect )
   {
@@ -141,12 +172,14 @@ void QgsFeatureSelectionModel::layerSelectionChanged( QgsFeatureIds selected, Qg
   else
   {
     QModelIndexList updatedIndexes;
-    foreach ( QgsFeatureId fid, selected )
+    const auto constSelected = selected;
+    for ( QgsFeatureId fid : constSelected )
     {
       updatedIndexes.append( expandIndexToRow( mFeatureModel->fidToIndex( fid ) ) );
     }
 
-    foreach ( QgsFeatureId fid, deselected )
+    const auto constDeselected = deselected;
+    for ( QgsFeatureId fid : constDeselected )
     {
       updatedIndexes.append( expandIndexToRow( mFeatureModel->fidToIndex( fid ) ) );
     }
@@ -155,16 +188,18 @@ void QgsFeatureSelectionModel::layerSelectionChanged( QgsFeatureIds selected, Qg
   }
 }
 
-QModelIndexList QgsFeatureSelectionModel::expandIndexToRow( const QModelIndex& index ) const
+QModelIndexList QgsFeatureSelectionModel::expandIndexToRow( const QModelIndex &index ) const
 {
   QModelIndexList indexes;
-  const QAbstractItemModel* model = index.model();
+  const QAbstractItemModel *model = index.model();
   int row = index.row();
 
   if ( !model )
     return indexes;
 
-  for ( int column = 0; column < model->columnCount(); ++column )
+  int columns = model->columnCount();
+  indexes.reserve( columns );
+  for ( int column = 0; column < columns; ++column )
   {
     indexes.append( model->index( row, column ) );
   }

@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ###########################################################################
 #    make_gource_video.sh
 #    ---------------------
 #    Date                 : October 2011
 #    Copyright            : (C) 2011 by Tim Sutton
-#    Email                : tim dot linfiniti at com
+#    Email                : tim at kartoza dot com
 ###########################################################################
 #                                                                         #
 #   This program is free software; you can redistribute it and/or modify  #

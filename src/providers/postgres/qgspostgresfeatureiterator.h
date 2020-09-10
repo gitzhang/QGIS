@@ -19,33 +19,80 @@
 
 #include <QQueue>
 
+#include "qgspostgresprovider.h"
 
 class QgsPostgresProvider;
 class QgsPostgresResult;
+class QgsPostgresTransaction;
 
-class QgsPostgresFeatureIterator : public QgsAbstractFeatureIterator
+
+class QgsPostgresFeatureSource final: public QgsAbstractFeatureSource
 {
   public:
-    QgsPostgresFeatureIterator( QgsPostgresProvider* p, const QgsFeatureRequest& request );
+    explicit QgsPostgresFeatureSource( const QgsPostgresProvider *p );
+    ~QgsPostgresFeatureSource() override;
 
-    ~QgsPostgresFeatureIterator();
+    QgsFeatureIterator getFeatures( const QgsFeatureRequest &request ) override;
 
-    //! fetch next feature, return true on success
-    virtual bool nextFeature( QgsFeature& feature );
+  private:
 
-    //! reset the iterator to the starting position
-    virtual bool rewind();
+    QString mConnInfo;
 
-    //! end of iterating: free the resources / lock
-    virtual bool close();
+    QString mGeometryColumn;
+    QString mBoundingBoxColumn;
+    QString mSqlWhereClause;
+    QgsFields mFields;
+    QgsPostgresGeometryColumnType mSpatialColType;
+    QString mRequestedSrid;
+    QString mDetectedSrid;
+    QgsWkbTypes::Type mRequestedGeomType; //!< Geometry type requested in the uri
+    QgsWkbTypes::Type mDetectedGeomType;  //!< Geometry type detected in the database
+    QgsPostgresPrimaryKeyType mPrimaryKeyType;
+    QList<int> mPrimaryKeyAttrs;
+    QString mQuery;
+    // TODO: loadFields()
+    QgsCoordinateReferenceSystem mCrs;
+
+    std::shared_ptr<QgsPostgresSharedData> mShared;
+
+    /* The transaction connection (if any) gets refed/unrefed when creating/
+     * destroying the QgsPostgresFeatureSource, to ensure that the transaction
+     * connection remains valid during the life time of the feature source
+     * even if the QgsPostgresTransaction object which initially created the
+     * connection has since been destroyed. */
+    QgsPostgresConn *mTransactionConnection = nullptr;
+
+    friend class QgsPostgresFeatureIterator;
+    friend class QgsPostgresExpressionCompiler;
+};
+
+
+class QgsPostgresConn;
+
+class QgsPostgresFeatureIterator final: public QgsAbstractFeatureIteratorFromSource<QgsPostgresFeatureSource>
+{
+  public:
+    QgsPostgresFeatureIterator( QgsPostgresFeatureSource *source, bool ownSource, const QgsFeatureRequest &request );
+
+    ~QgsPostgresFeatureIterator() override;
+
+    bool rewind() override;
+    bool close() override;
 
   protected:
-    QgsPostgresProvider* P;
+    bool fetchFeature( QgsFeature &feature ) override;
+    bool nextFeatureFilterExpression( QgsFeature &f ) override;
+    bool prepareSimplification( const QgsSimplifyMethod &simplifyMethod ) override;
+
+  private:
+
+    QgsPostgresConn *mConn = nullptr;
+
 
     QString whereClauseRect();
     bool getFeature( QgsPostgresResult &queryResult, int row, QgsFeature &feature );
-    void getFeatureAttribute( int idx, QgsPostgresResult& queryResult, int row, int& col, QgsFeature& feature );
-    bool declareCursor( const QString& whereClause );
+    void getFeatureAttribute( int idx, QgsPostgresResult &queryResult, int row, int &col, QgsFeature &feature );
+    bool declareCursor( const QString &whereClause, long limit = -1, bool closeOnFail = true, const QString &orderBy = QString() );
 
     QString mCursorName;
 
@@ -56,13 +103,30 @@ class QgsPostgresFeatureIterator : public QgsAbstractFeatureIterator
     QQueue<QgsFeature> mFeatureQueue;
 
     //! Maximal size of the feature queue
-    int mFeatureQueueSize;
+    int mFeatureQueueSize = 2000;
 
-    //!< Number of retrieved features
-    int mFetched;
+    //! Number of retrieved features
+    int mFetched = 0;
 
-    static const int sFeatureQueueSize;
+    //! Sets to true, if geometry is in the requested columns
+    bool mFetchGeometry = false;
 
+    bool mIsTransactionConnection = false;
+
+    bool providerCanSimplify( QgsSimplifyMethod::MethodType methodType ) const override;
+
+    bool prepareOrderBy( const QList<QgsFeatureRequest::OrderByClause> &orderBys ) override;
+
+    inline void lock();
+    inline void unlock();
+
+    bool mExpressionCompiled = false;
+    bool mOrderByCompiled = false;
+    bool mLastFetch = false;
+    bool mFilterRequiresGeometry = false;
+
+    QgsCoordinateTransform mTransform;
+    QgsRectangle mFilterRect;
 };
 
 #endif // QGSPOSTGRESFEATUREITERATOR_H

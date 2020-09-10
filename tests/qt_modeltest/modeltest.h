@@ -1,63 +1,43 @@
 /****************************************************************************
 **
-** Copyright (C) 2011 Nokia Corporation and/or its subsidiary(-ies).
-** All rights reserved.
-** Contact: Nokia Corporation (qt-info@nokia.com)
+** Copyright (C) 2016 The Qt Company Ltd.
+** Contact: https://www.qt.io/licensing/
 **
-** This file is part of the test suite of the Qt Toolkit.
+** This file is part of Qt Creator.
 **
-** This file is free software: you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation, either version 3 of the License, or
-** (at your option) any later version.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** GNU Lesser General Public License Usage
-** This file may be used under the terms of the GNU Lesser General Public
-** License version 2.1 as published by the Free Software Foundation and
-** appearing in the file LICENSE.LGPL included in the packaging of this
-** file. Please review the following information to ensure the GNU Lesser
-** General Public License version 2.1 requirements will be met:
-** http://www.gnu.org/licenses/old-licenses/lgpl-2.1.html.
-**
-** In addition, as a special exception, Nokia gives you certain additional
-** rights. These rights are described in the Nokia Qt LGPL Exception
-** version 1.1, included in the file LGPL_EXCEPTION.txt in this package.
+** Commercial License Usage
+** Licensees holding valid commercial Qt licenses may use this file in
+** accordance with the commercial license agreement provided with the
+** Software or, alternatively, in accordance with the terms contained in
+** a written agreement between you and The Qt Company. For licensing terms
+** and conditions see https://www.qt.io/terms-conditions. For further
+** information use the contact form at https://www.qt.io/contact-us.
 **
 ** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU General
-** Public License version 3.0 as published by the Free Software Foundation
-** and appearing in the file LICENSE.GPL included in the packaging of this
-** file. Please review the following information to ensure the GNU General
-** Public License version 3.0 requirements will be met:
-** http://www.gnu.org/copyleft/gpl.html.
-**
-** Other Usage
-** Alternatively, this file may be used in accordance with the terms and
-** conditions contained in a signed written agreement between you and Nokia.
-**
-**
-**
-**
-**
-** $QT_END_LICENSE$
+** Alternatively, this file may be used under the terms of the GNU
+** General Public License version 3 as published by the Free Software
+** Foundation with exceptions as appearing in the file LICENSE.GPL3-EXCEPT
+** included in the packaging of this file. Please review the following
+** information to ensure the GNU General Public License requirements will
+** be met: https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ****************************************************************************/
-
 
 #ifndef MODELTEST_H
 #define MODELTEST_H
 
-#include <QtCore/QObject>
-#include <QtCore/QAbstractItemModel>
-#include <QtCore/QStack>
+#include <QAbstractItemModel>
+#include <QObject>
+#include <QStack>
 
-class ModelTest : public QObject
+#include "qgis_core.h"
+
+class CORE_EXPORT ModelTest : public QObject
 {
     Q_OBJECT
 
   public:
-    ModelTest( QAbstractItemModel *model, QObject *parent = 0 );
+    ModelTest( QAbstractItemModel *model, QObject *parent = nullptr );
 
   private Q_SLOTS:
     void nonDestructiveBasicTest();
@@ -73,14 +53,14 @@ class ModelTest : public QObject
     void layoutAboutToBeChanged();
     void layoutChanged();
     void rowsAboutToBeInserted( const QModelIndex &parent, int start, int end );
-    void rowsInserted( const QModelIndex & parent, int start, int end );
+    void rowsInserted( const QModelIndex &parent, int start, int end );
     void rowsAboutToBeRemoved( const QModelIndex &parent, int start, int end );
-    void rowsRemoved( const QModelIndex & parent, int start, int end );
+    void rowsRemoved( const QModelIndex &parent, int start, int end );
 
   private:
     void checkChildren( const QModelIndex &parent, int currentDepth = 0 );
 
-    QAbstractItemModel *model;
+    QAbstractItemModel *model = nullptr;
 
     struct Changing
     {
@@ -92,7 +72,7 @@ class ModelTest : public QObject
     QStack<Changing> insert;
     QStack<Changing> remove;
 
-    bool fetchingMore;
+    bool fetchingMore = false;
 
     QList<QPersistentModelIndex> changing;
 };

@@ -27,217 +27,60 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
+#ifndef PAL_H
+#define PAL_H
 
-#ifndef _PAL_H
-#define _PAL_H
+#define SIP_NO_FILE
 
 
-#include <list>
+#include "qgis_core.h"
+#include "qgsgeometry.h"
+#include "qgsgeos.h"
+#include "qgspallabeling.h"
+#include "qgslabelingenginesettings.h"
+#include <QList>
 #include <iostream>
 #include <ctime>
+#include <QMutex>
+#include <QStringList>
+#include <unordered_map>
 
 // TODO ${MAJOR} ${MINOR} etc instead of 0.2
 
-/**
- * \mainpage Pal Libray
- *
- * \section intro_sec Introduction
- *
- * Pal is a labelling library released under the GPLv3 license
- *
- */
+class QgsAbstractLabelProvider;
 
 namespace pal
 {
-
-  template <class Type> class LinkedList;
-
   class Layer;
   class LabelPosition;
   class PalStat;
   class Problem;
   class PointSet;
-  class SimpleMutex;
 
-  /** Units for label sizes and distlabel */
-  enum _Units
+  //! Search method to use
+  enum SearchMethod
   {
-    PIXEL = 0, /**< pixel [px]*/
-    METER, /**< meter [m]*/
-    FOOT, /**< foot [ft]*/
-    DEGREE /**< degree [°] */
-  };
-
-  /** Typedef for _Units enumeration */
-  typedef enum _Units Units;
-
-  /** Search method to use */
-  enum _searchMethod
-  {
-    CHAIN = 0, /**< is the worst but fastest method */
-    POPMUSIC_TABU_CHAIN = 1, /**< is the best but slowest */
-    POPMUSIC_TABU = 2, /**< is a little bit better than CHAIN but slower*/
-    POPMUSIC_CHAIN = 3, /**< is slower and best than TABU, worse and faster than TABU_CHAIN */
-    FALP = 4 /** only initial solution */
-  };
-
-  /** Typedef for _Units enumeration */
-  typedef enum _searchMethod SearchMethod;
-
-  /** The way to arrange labels against spatial entities
-   *
-   * \image html arrangement.png "Arrangement modes" width=7cm
-   * */
-  enum _arrangement
-  {
-    P_POINT = 0, /**< arranges candidates around a point (centroid for polygon)*/
-    P_POINT_OVER, /** arranges candidates over a point (centroid for polygon)*/
-    P_LINE, /**< Only for lines and polygons, arranges candidates over the line or the polygon perimeter */
-    P_CURVED, /** Only for lines, labels along the line */
-    P_HORIZ, /**< Only for polygon, arranges candidates horizontaly */
-    P_FREE /**< Only for polygon, arranges candidates with respect of polygon orientation */
-  };
-
-  /** typedef for _arrangement enumeration */
-  typedef enum _arrangement Arrangement;
-
-  /** enumeration line arrangement flags. Flags can be combined. */
-  enum LineArrangementFlags
-  {
-    FLAG_ON_LINE     = 1,
-    FLAG_ABOVE_LINE  = 2,
-    FLAG_BELOW_LINE  = 4,
-    FLAG_MAP_ORIENTATION = 8
+    CHAIN = 0, //!< Is the worst but fastest method
+    POPMUSIC_TABU_CHAIN = 1, //!< Is the best but slowest
+    POPMUSIC_TABU = 2, //!< Is a little bit better than CHAIN but slower
+    POPMUSIC_CHAIN = 3, //!< Is slower and best than TABU, worse and faster than TABU_CHAIN
+    FALP = 4 //!< Only initial solution
   };
 
   /**
-   *  \brief Pal main class.
+   * \ingroup core
+   *  \brief Main Pal labeling class
    *
-   *  A pal object will contains layers and global informations such as which search method
-   *  will be used, the map resolution (dpi) ....
-   *
-   *  \author Maxence Laurent <maxence _dot_ laurent _at_ heig-vd _dot_ ch>
+   *  A pal object will contains layers and global information such as which search method
+   *  will be used.
+   *  \class pal::Pal
+   *  \note not available in Python bindings
    */
   class CORE_EXPORT Pal
   {
       friend class Problem;
       friend class FeaturePart;
       friend class Layer;
-    private:
-      std::list<Layer*> * layers;
-
-      SimpleMutex *lyrsMutex;
-
-      // TODO remove after tests !!!
-      clock_t tmpTime;
-
-      Units map_unit;
-
-      /**
-       * \brief maximum # candidates for a point
-       */
-      int point_p;
-
-      /**
-       * \brief maximum # candidates for a line
-       */
-      int line_p;
-
-      /**
-       * \brief maximum # candidates for a polygon
-       */
-      int poly_p;
-
-      SearchMethod searchMethod;
-
-      /*
-       * POPMUSIC Tuning
-       */
-      int popmusic_r;
-
-      int tabuMaxIt;
-      int tabuMinIt;
-
-      int dpi;
-
-      int ejChainDeg;
-      int tenure;
-      double candListSize;
-
-      /**
-       * \brief Problem factory
-       * Extract features to label and generates candidates for them,
-       * respects to a bounding box and a map scale
-       *
-       * @param nbLayers  number of layers to extract
-       * @param layersName layers name to be extracted
-       * @param layersFactor layer's factor (priority between layers, 0 is the best, 1 the worst)
-       * @param lambda_min xMin bounding-box
-       * @param phi_min yMin bounding-box
-       * @param lambda_max xMax bounding-box
-       * @param phi_max yMax bounding-box
-       * @param scale the scale (1:scale)
-       * @param svgmap stream to wrtie the svg map (need _EXPORT_MAP_ #defined to work)
-       */
-      Problem* extract( int nbLayers, char **layersName, double *layersFactor,
-                        double lambda_min, double phi_min,
-                        double lambda_max, double phi_max,
-                        double scale, std::ofstream *svgmap );
-
-
-      /**
-       * \brief Choose the size of popmusic subpart's
-       * @param r subpart size
-       */
-      void setPopmusicR( int r );
-
-
-
-      /**
-       * \brief minimum # of iteration for search method POPMUSIC_TABU, POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN
-       * @param min_it Sub part optimization min # of iteration
-       */
-      void setMinIt( int min_it );
-
-      /**
-       * \brief maximum \# of iteration for search method POPMUSIC_TABU, POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN
-       * @param max_it Sub part optimization max # of iteration
-       */
-      void setMaxIt( int max_it );
-
-      /**
-       * \brief For tabu search : how many iteration a feature will be tabu
-       * @param tenure consiser a feature as tabu for tenure iteration after updating feature in solution
-       */
-      void setTenure( int tenure );
-
-      /**
-       * \brief For *CHAIN, select the max size of a transformation chain
-       * @param degree maximum soze of a transformation chain
-       */
-      void setEjChainDeg( int degree );
-
-      /**
-       * \brief How many candidates will be tested by a tabu iteration
-       * @param fact the ration (0..1) of candidates to test
-       */
-      void setCandListSize( double fact );
-
-
-      /**
-       * \brief Get the minimum # of iteration doing in POPMUSIC_TABU, POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN
-       * @return minimum # of iteration
-       */
-      int getMinIt();
-      /**
-       * \brief Get the maximum # of iteration doing in POPMUSIC_TABU, POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN
-       * @return maximum # of iteration
-       */
-      int getMaxIt();
-
 
     public:
 
@@ -246,180 +89,253 @@ namespace pal
        */
       Pal();
 
-      /**
-       * \brief delete an instance
-       */
       ~Pal();
+
+      //! Pal cannot be copied.
+      Pal( const Pal &other ) = delete;
+      //! Pal cannot be copied.
+      Pal &operator=( const Pal &other ) = delete;
 
       /**
        * \brief add a new layer
        *
-       * @param lyrName layer's name
-       * @param min_scale bellow this scale: no labelling (-1 to disable)
-       * @param max_scale above this scale: no labelling (-1 to disable)
-       * @param arrangement Howto place candidates
-       * @param label_unit Unit for labels sizes
-       * @param defaultPriority layer's prioriry (0 is the best, 1 the worst)
-       * @param obstacle 'true' will discourage other label to be placed above features of this layer
-       * @param active is the layer is active (currently displayed)
-       * @param toLabel the layer will be labeled only if toLablel is true
-       * @param displayAll if true, all features will be labelled even though overlaps occur
+       * \param provider Provider associated with the layer
+       * \param layerName layer's name
+       * \param arrangement Howto place candidates
+       * \param defaultPriority layer's prioriry (0 is the best, 1 the worst)
+       * \param active is the layer is active (currently displayed)
+       * \param toLabel the layer will be labeled only if toLablel is TRUE
+       * \param displayAll if TRUE, all features will be labelled even though overlaps occur
        *
-       * @throws PalException::LayerExists
-       *
-       * @todo add symbolUnit
+       * \throws PalException::LayerExists
        */
-      Layer * addLayer( const char *lyrName, double min_scale, double max_scale, Arrangement arrangement, Units label_unit, double defaultPriority, bool obstacle, bool active, bool toLabel, bool displayAll = false );
-
-      /**
-       * \brief Look for a layer
-       *
-       * @param lyrName name of layer to search
-       *
-       * @throws PalException::UnkownLayer
-       *
-       * @return a pointer on layer or NULL if layer not exist
-       */
-      Layer *getLayer( const char *lyrName );
-
-      /**
-       * \brief get all layers
-       *
-       * @return a list of all layers
-       */
-      std::list<Layer*> *getLayers();
+      Layer *addLayer( QgsAbstractLabelProvider *provider, const QString &layerName, QgsPalLayerSettings::Placement arrangement, double defaultPriority, bool active, bool toLabel, bool displayAll = false );
 
       /**
        * \brief remove a layer
        *
-       * @param layer layer to remove
+       * \param layer layer to remove
        */
       void removeLayer( Layer *layer );
 
+      typedef bool ( *FnIsCanceled )( void *ctx );
+
+      //! Register a function that returns whether this job has been canceled - PAL calls it during the computation
+      void registerCancellationCallback( FnIsCanceled fnCanceled, void *context );
+
+      //! Check whether the job has been canceled
+      inline bool isCanceled() { return fnIsCanceled ? fnIsCanceled( fnIsCanceledContext ) : false; }
+
       /**
-       * \brief the labeling machine
-       * Will extract all active layers
+       * Extracts the labeling problem for the specified map \a extent - only features within this
+       * extent will be considered. The \a mapBoundary argument specifies the actual geometry of the map
+       * boundary, which will be used to detect whether a label is visible (or partially visible) in
+       * the rendered map. This may differ from \a extent in the case of rotated or non-rectangular
+       * maps.
+       */
+      std::unique_ptr< Problem > extractProblem( const QgsRectangle &extent, const QgsGeometry &mapBoundary );
+
+      /**
+       * Solves the labeling problem, selecting the best candidate locations for all labels and returns a list of these
+       * calculated label positions.
        *
-       * @param scale map scale is 1:scale
-       * @param bbox map extent
-       * @param stats A PalStat object (can be NULL)
-       * @param displayAll if true, all feature will be labelled even though overlaps occur
+       * If \a displayAll is true, then the best positions for ALL labels will be returned, regardless of whether these
+       * labels overlap other labels.
        *
-       * @return A list of label to display on map
-       */
-      std::list<LabelPosition*> *labeller( double scale, double bbox[4], PalStat **stats, bool displayAll );
-
-
-      /**
-       * \brief the labeling machine
-       * Active layers are specifiend through layersName array
-       * @todo add obstacles and tolabel arrays
+       * If the optional \a unlabeled list is specified, it will be filled with a list of all feature labels which could
+       * not be placed in the returned solution (e.g. due to overlaps or other constraints).
        *
-       * @param nbLayers # layers
-       * @param layersName names of layers to label
-       * @param layersFactor layers priorities array
-       * @param scale map scale is  '1:scale'
-       * @param bbox map extent
-       * @param stat will be filled with labelling process statistics, can be NULL
-       * @param displayAll if true, all feature will be labelled even though overlaps occur
+       * Ownership of the returned labels is not transferred - it resides with the pal object.
+       */
+      QList<LabelPosition *> solveProblem( Problem *prob, bool displayAll, QList<pal::LabelPosition *> *unlabeled = nullptr );
+
+      /**
+       * Sets whether partial labels show be allowed.
        *
-       * @todo UnknownLayer will be ignored ? should throw exception or not ???
+       * \see showPartialLabels()
+       */
+      void setShowPartialLabels( bool show );
+
+      /**
+       * Returns whether partial labels should be allowed.
        *
-       * @return A list of label to display on map
+       * \see setShowPartialLabels()
        */
-      std::list<LabelPosition*> *labeller( int nbLayers,
-                                           char **layersName,
-                                           double *layersFactor,
-                                           double scale, double bbox[4],
-                                           PalStat **stat,
-                                           bool displayAll );
-
-
-      Problem* extractProblem( double scale, double bbox[4] );
-
-      std::list<LabelPosition*>* solveProblem( Problem* prob, bool displayAll );
+      bool showPartialLabels() const;
 
       /**
-       * \brief Set map resolution
+       * Returns the maximum number of line label candidate positions per map unit.
        *
-       * @param dpi map resolution (dot per inch)
+       * \see setMaximumLineCandidatesPerMapUnit()
        */
-      void setDpi( int dpi );
+      double maximumLineCandidatesPerMapUnit() const { return mMaxLineCandidatesPerMapUnit; }
 
       /**
-       * \brief get map resolution
+       * Sets the maximum number of line label \a candidates per map unit.
        *
-       * @return map resolution (dot per inch)
+       * \see maximumLineCandidatesPerMapUnit()
        */
-      int getDpi();
-
-
+      void setMaximumLineCandidatesPerMapUnit( double candidates ) { mMaxLineCandidatesPerMapUnit = candidates; }
 
       /**
-       * \brief set # candidates to generate for points features
-       * Higher the value is, longer Pal::labeller will spend time
+       * Returns the maximum number of polygon label candidate positions per map unit squared.
        *
-       * @param point_p # candidates for a point
+       * \see setMaximumPolygonCandidatesPerMapUnitSquared()
        */
-      void setPointP( int point_p );
+      double maximumPolygonCandidatesPerMapUnitSquared() const { return mMaxPolygonCandidatesPerMapUnitSquared; }
 
       /**
-       * \brief set maximum # candidates to generate for lines features
-       * Higher the value is, longer Pal::labeller will spend time
+       * Sets the maximum number of polygon label \a candidates per map unit squared.
        *
-       * @param line_p maximum # candidates for a line
+       * \see maximumPolygonCandidatesPerMapUnitSquared()
        */
-      void setLineP( int line_p );
+      void setMaximumPolygonCandidatesPerMapUnitSquared( double candidates ) { mMaxPolygonCandidatesPerMapUnitSquared = candidates; }
 
       /**
-       * \brief set maximum # candidates to generate for polygon features
-       * Higher the value is, longer Pal::labeller will spend time
+       * Returns the placement engine version, which dictates how the label placement problem is solved.
        *
-       * @param poly_p maximum # candidate for a polygon
+       * \see setPlacementVersion()
        */
-      void setPolyP( int poly_p );
+      QgsLabelingEngineSettings::PlacementEngineVersion placementVersion() const;
 
       /**
-       *  \brief get # candidates to generate for point features
-       */
-      int getPointP();
-
-      /**
-       *  \brief get maximum  # candidates to generate for line features
-       */
-      int getLineP();
-
-      /**
-       *  \brief get maximum # candidates to generate for polygon features
-       */
-      int getPolyP();
-
-      /**
-       * \brief get current map unit
-       */
-      Units getMapUnit();
-
-      /**
-       * \brief set map unit
-       */
-      void setMapUnit( Units map_unit );
-
-      /**
-       * \brief Select the search method to use.
+       * Sets the placement engine \a version, which dictates how the label placement problem is solved.
        *
-       * For interactive mapping using CHAIN is a good
-       * idea because it is the fastest. Other methods, ordered by speedness, are POPMUSIC_TABU,
-       * POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN, defined in pal::_searchMethod enumeration
-       * @param method the method to use
+       * \see placementVersion()
        */
-      void setSearch( SearchMethod method );
+      void setPlacementVersion( QgsLabelingEngineSettings::PlacementEngineVersion placementVersion );
 
       /**
-       * \brief get the search method in use
+       * Returns the global candidates limit for point features, or 0 if no global limit is in effect.
        *
-       * @return the search method
+       * This is an installation-wide setting which applies to all projects, and is set via QSettings. It can
+       * be used to place global limits on the number of candidates generated for point features in order
+       * to optimise map rendering speeds.
+       *
+       * \see globalCandidatesLimitLine()
+       * \see globalCandidatesLimitPolygon()
        */
-      SearchMethod getSearch();
+      int globalCandidatesLimitPoint() const { return mGlobalCandidatesLimitPoint; }
+
+      /**
+       * Returns the global candidates limit for line features, or 0 if no global limit is in effect.
+       *
+       * This is an installation-wide setting which applies to all projects, and is set via QSettings. It can
+       * be used to place global limits on the number of candidates generated for line features in order
+       * to optimise map rendering speeds.
+       *
+       * \see globalCandidatesLimitPolygon()
+       * \see globalCandidatesLimitPoint()
+       */
+      int globalCandidatesLimitLine() const { return mGlobalCandidatesLimitLine; }
+
+      /**
+       * Returns the global candidates limit for polygon features, or 0 if no global limit is in effect.
+       *
+       * This is an installation-wide setting which applies to all projects, and is set via QSettings. It can
+       * be used to place global limits on the number of candidates generated for polygon features in order
+       * to optimise map rendering speeds.
+       *
+       * \see globalCandidatesLimitLine()
+       * \see globalCandidatesLimitPoint()
+       */
+      int globalCandidatesLimitPolygon() const { return mGlobalCandidatesLimitPolygon; }
+
+    private:
+
+      std::unordered_map< QgsAbstractLabelProvider *, std::unique_ptr< Layer > > mLayers;
+
+      QMutex mMutex;
+
+      /*
+       * POPMUSIC Tuning
+       */
+      int mPopmusicR = 30;
+
+      int mTabuMaxIt = 4;
+      int mTabuMinIt = 2;
+
+      int mEjChainDeg = 50;
+      int mTenure = 10;
+      double mCandListSize = 0.2;
+
+      /**
+       * \brief show partial labels (cut-off by the map canvas) or not
+       */
+      bool mShowPartialLabels = true;
+
+      double mMaxLineCandidatesPerMapUnit = 0;
+      double mMaxPolygonCandidatesPerMapUnitSquared = 0;
+
+      int mGlobalCandidatesLimitPoint = 0;
+      int mGlobalCandidatesLimitLine = 0;
+      int mGlobalCandidatesLimitPolygon = 0;
+
+      QgsLabelingEngineSettings::PlacementEngineVersion mPlacementVersion = QgsLabelingEngineSettings::PlacementEngineVersion2;
+
+      //! Callback that may be called from PAL to check whether the job has not been canceled in meanwhile
+      FnIsCanceled fnIsCanceled = nullptr;
+      //! Application-specific context for the cancellation check function
+      void *fnIsCanceledContext = nullptr;
+
+      /**
+       * Creates a Problem, by extracting labels and generating candidates from the given \a extent.
+       * The \a mapBoundary geometry specifies the actual visible region of the map, and is used
+       * for pruning candidates which fall outside the visible region.
+       */
+      std::unique_ptr< Problem > extract( const QgsRectangle &extent, const QgsGeometry &mapBoundary );
+
+      /**
+       * \brief Choose the size of popmusic subpart's
+       * \param r subpart size
+       */
+      void setPopmusicR( int r );
+
+      /**
+       * \brief minimum # of iteration for search method POPMUSIC_TABU, POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN
+       * \param min_it Sub part optimization min # of iteration
+       */
+      void setMinIt( int min_it );
+
+      /**
+       * \brief maximum \# of iteration for search method POPMUSIC_TABU, POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN
+       * \param max_it Sub part optimization max # of iteration
+       */
+      void setMaxIt( int max_it );
+
+      /**
+       * \brief For tabu search : how many iteration a feature will be tabu
+       * \param tenure consiser a feature as tabu for tenure iteration after updating feature in solution
+       */
+      void setTenure( int tenure );
+
+      /**
+       * \brief For *CHAIN, select the max size of a transformation chain
+       * \param degree maximum soze of a transformation chain
+       */
+      void setEjChainDeg( int degree );
+
+      /**
+       * \brief How many candidates will be tested by a tabu iteration
+       * \param fact the ration (0..1) of candidates to test
+       */
+      void setCandListSize( double fact );
+
+
+      /**
+       * Returns the minimum number of iterations used for POPMUSIC_TABU, POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN.
+       * \see getMaxIt()
+       */
+      int getMinIt();
+
+      /**
+       * Returns the maximum number of iterations allowed for POPMUSIC_TABU, POPMUSIC_CHAIN and POPMUSIC_TABU_CHAIN.
+       * \see getMinIt()
+       */
+      int getMaxIt();
+
   };
+
 } // end namespace pal
+
 #endif

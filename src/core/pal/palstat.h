@@ -27,45 +27,38 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
+#ifndef PALSTAT_H
+#define PALSTAT_H
 
-#ifndef _PALSTAT_H_
-#define _PALSTAT_H_
+#define SIP_NO_FILE
 
+
+#include <QStringList>
 
 namespace pal
 {
 
   /**
-   * Summury of problem
+   * \ingroup core
+   * \brief Summary statistics of labeling problem.
+   * \class pal::PalStat
+   * \note not available in Python bindings
    */
+
   class PalStat
   {
 
       friend class Pal;
       friend class Problem;
 
-    private:
-      int nbObjects;
-      int nbLabelledObjects;
-
-      int nbLayers;
-
-      char **layersName; //[nbLayers]
-      int *layersNbObjects; // [nbLayers]
-      int *layersNbLabelledObjects; // [nbLayers]
-
-      PalStat();
-
     public:
 
-      /**
-       * \brief delete stats
-       */
       ~PalStat();
 
+      //! PalStat cannot be copied
+      PalStat( const PalStat &other ) = delete;
+      //! PalStat cannot be copied
+      PalStat &operator=( const PalStat &other ) = delete;
 
       /**
        * \brief the number of object in problem
@@ -83,19 +76,32 @@ namespace pal
       int getNbLayers();
 
       /**
-       * \brief get a name of the labelled layer 'layerId'
+       * Returns the name of the labelled layer \a layerId.
        */
-      const char * getLayerName( int layerId );
+      QString getLayerName( int layerId );
 
       /**
-       * \brief get the number of object in layer 'layerId'
+       * Returns the number of object in layer \a layerId.
        */
       int getLayerNbObjects( int layerId );
 
       /**
-       * \brief get the number of object in layer 'layerId' which are labelled
+       * Returns the number of object in layer \a layerId which are labelled.
        */
       int getLayerNbLabelledObjects( int layerId );
+
+    private:
+      int nbObjects;
+      int nbLabelledObjects;
+
+      int nbLayers;
+
+      QStringList layersName;
+      int *layersNbObjects; // [nbLayers]
+      int *layersNbLabelledObjects; // [nbLayers]
+
+      PalStat();
+
   };
 
 } // end namespace pal

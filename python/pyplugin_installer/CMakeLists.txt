@@ -9,18 +9,21 @@ SET(PY_PLUGININSTALLER_FILES
     qgsplugininstallerpluginerrordialog.py
     qgsplugininstallerfetchingdialog.py
     qgsplugininstallerrepositorydialog.py
+    qgsplugindependenciesdialog.py
+    plugindependencies.py
     unzip.py
     version_compare.py
 )
 
 # FILE(GLOB UI_FILES *.ui)
-# PYQT4_WRAP_UI(PYUI_FILES ${UI_FILES})
+# PYQT_WRAP_UI(PYUI_FILES ${UI_FILES})
 
-PYQT4_WRAP_UI(PYUI_FILES
+PYQT_WRAP_UI(PYUI_FILES
     qgsplugininstallerfetchingbase.ui
     qgsplugininstallerinstallingbase.ui
     qgsplugininstallerpluginerrorbase.ui
     qgsplugininstallerrepositorybase.ui
+    qgsplugindependenciesdialogbase.ui
 )
 
 ADD_CUSTOM_TARGET(pyplugin-installer ALL DEPENDS ${PYUI_FILES})
@@ -39,5 +42,6 @@ FOREACH(pyfile ${PY_PLUGININSTALLER_FILES} ${PYUI_FILES})
     DEPENDS ${pyfile}
   )
 ENDFOREACH(pyfile)
+PY_COMPILE(pyplugin-installer "${PYTHON_OUTPUT_DIRECTORY}/pyplugin_installer")
 
 INSTALL(FILES ${PY_PLUGININSTALLER_FILES} ${PYUI_FILES} DESTINATION "${QGIS_PLUGININSTALLER_DIR}")

@@ -14,208 +14,133 @@
  *   (at your option) any later version.                                   *
  *                                                                         *
  ***************************************************************************/
-#include "qgsbookmarks.h"
+
+
 #include "qgisapp.h"
 #include "qgsapplication.h"
-#include "qgscontexthelp.h"
+#include "qgsbookmarks.h"
+#include "qgsbookmarkeditordialog.h"
 #include "qgsmapcanvas.h"
-#include "qgsmaprenderer.h"
 #include "qgsproject.h"
-
+#include "qgsmessagelog.h"
 #include "qgslogger.h"
+#include "qgssettings.h"
+#include "qgsgui.h"
+#include "qgsbookmarkmanager.h"
+#include "qgsbookmarkmodel.h"
+#include "qgsmessagebar.h"
 
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
-#include <QSettings>
-#include <QPushButton>
-#include <QSqlTableModel>
-#include <QSqlError>
-#include <QSqlQuery>
+#include <QModelIndex>
+#include <QDoubleSpinBox>
+#include <QAbstractTableModel>
+#include <QToolButton>
 
-QgsBookmarks *QgsBookmarks::sInstance = 0;
 
-QgsBookmarks::QgsBookmarks( QWidget *parent, Qt::WFlags fl )
-    : QDialog( parent, fl )
+const int QgsDoubleSpinBoxBookmarksDelegate::DECIMAL_PLACES = 6;
+
+QgsBookmarks::QgsBookmarks( QWidget *parent )
+  : QgsDockWidget( parent )
+
 {
   setupUi( this );
-  restorePosition();
+  QgsGui::enableAutoGeometryRestore( this );
 
-  //
-  // Create the zoomto and delete buttons and add them to the
-  // toolbar
-  //
-  QPushButton *btnAdd    = new QPushButton( tr( "&Add" ) );
-  QPushButton *btnDelete = new QPushButton( tr( "&Delete" ) );
-  QPushButton *btnZoomTo = new QPushButton( tr( "&Zoom to" ) );
-  btnZoomTo->setDefault( true );
-  buttonBox->addButton( btnAdd, QDialogButtonBox::ActionRole );
-  buttonBox->addButton( btnDelete, QDialogButtonBox::ActionRole );
-  buttonBox->addButton( btnZoomTo, QDialogButtonBox::ActionRole );
+  connect( lstBookmarks, &QTreeView::doubleClicked, this, &QgsBookmarks::lstBookmarks_doubleClicked );
 
-  connect( btnAdd, SIGNAL( clicked() ), this, SLOT( addClicked() ) );
-  connect( btnDelete, SIGNAL( clicked() ), this, SLOT( deleteClicked() ) );
-  connect( btnZoomTo, SIGNAL( clicked() ), this, SLOT( zoomToBookmark() ) );
+  bookmarksDockContents->layout()->setMargin( 0 );
+  bookmarksDockContents->layout()->setContentsMargins( 0, 0, 0, 0 );
+  static_cast< QGridLayout * >( bookmarksDockContents->layout() )->setVerticalSpacing( 0 );
 
-  // open the database
-  QSqlDatabase db = QSqlDatabase::addDatabase( "QSQLITE", "bookmarks" );
-  db.setDatabaseName( QgsApplication::qgisUserDbFilePath() );
-  if ( !db.open() )
-  {
-    QMessageBox::warning( this, tr( "Error" ),
-                          tr( "Unable to open bookmarks database.\nDatabase: %1\nDriver: %2\nDatabase: %3" )
-                          .arg( QgsApplication::qgisUserDbFilePath() )
-                          .arg( db.lastError().driverText() )
-                          .arg( db.lastError().databaseText() )
-                        );
-    deleteLater();
-    return;
-  }
+  QToolButton *btnImpExp = new QToolButton;
+  btnImpExp->setAutoRaise( true );
+  btnImpExp->setToolTip( tr( "Import/Export Bookmarks" ) );
+  btnImpExp->setIcon( QgsApplication::getThemeIcon( QStringLiteral( "/mActionSharing.svg" ) ) );
+  btnImpExp->setPopupMode( QToolButton::InstantPopup );
 
-  QSqlTableModel *model = new QSqlTableModel( this, db );
-  model->setTable( "tbl_bookmarks" );
-  model->setSort( 0, Qt::AscendingOrder );
-  model->setEditStrategy( QSqlTableModel::OnFieldChange );
-  model->select();
+  QMenu *share = new QMenu( this );
+  QAction *btnExport = share->addAction( tr( "&Export" ) );
+  QAction *btnImport = share->addAction( tr( "&Import" ) );
+  btnExport->setIcon( QgsApplication::getThemeIcon( QStringLiteral( "/mActionSharingExport.svg" ) ) );
+  btnImport->setIcon( QgsApplication::getThemeIcon( QStringLiteral( "/mActionSharingImport.svg" ) ) );
+  connect( btnExport, &QAction::triggered, this, &QgsBookmarks::exportToXml );
+  connect( btnImport, &QAction::triggered, this, &QgsBookmarks::importFromXml );
+  btnImpExp->setMenu( share );
 
-  // set better headers then column names from table
-  model->setHeaderData( 0, Qt::Horizontal, tr( "ID" ) );
-  model->setHeaderData( 1, Qt::Horizontal, tr( "Name" ) );
-  model->setHeaderData( 2, Qt::Horizontal, tr( "Project" ) );
-  model->setHeaderData( 3, Qt::Horizontal, tr( "xMin" ) );
-  model->setHeaderData( 4, Qt::Horizontal, tr( "yMin" ) );
-  model->setHeaderData( 5, Qt::Horizontal, tr( "xMax" ) );
-  model->setHeaderData( 6, Qt::Horizontal, tr( "yMax" ) );
-  model->setHeaderData( 7, Qt::Horizontal, tr( "SRID" ) );
+  connect( actionAdd, &QAction::triggered, this, &QgsBookmarks::addClicked );
+  connect( actionDelete, &QAction::triggered, this, &QgsBookmarks::deleteClicked );
+  connect( actionZoomTo, &QAction::triggered, this, &QgsBookmarks::zoomToBookmark );
 
-  lstBookmarks->setModel( model );
+  mBookmarkToolbar->addWidget( btnImpExp );
 
-  QSettings settings;
-  lstBookmarks->header()->restoreState( settings.value( "/Windows/Bookmarks/headerstate" ).toByteArray() );
+  mBookmarkModel = new QgsBookmarkManagerProxyModel( QgsApplication::bookmarkManager(), QgsProject::instance()->bookmarkManager(), this );
 
-#ifndef QGISDEBUG
-  lstBookmarks->setColumnHidden( 0, true );
-#endif
+  lstBookmarks->setModel( mBookmarkModel );
+  lstBookmarks->setItemDelegate( new QgsDoubleSpinBoxBookmarksDelegate( this ) );
+  lstBookmarks->setSortingEnabled( true );
+  lstBookmarks->sortByColumn( 0, Qt::AscendingOrder );
+
+  QgsSettings settings;
+  lstBookmarks->header()->restoreState( settings.value( QStringLiteral( "Windows/Bookmarks/headerstateV2" ) ).toByteArray() );
 }
 
 QgsBookmarks::~QgsBookmarks()
 {
   saveWindowLocation();
-  sInstance = 0;
-}
-
-void QgsBookmarks::restorePosition()
-{
-  QSettings settings;
-  restoreGeometry( settings.value( "/Windows/Bookmarks/geometry" ).toByteArray() );
 }
 
 void QgsBookmarks::saveWindowLocation()
 {
-  QSettings settings;
-  settings.setValue( "/Windows/Bookmarks/geometry", saveGeometry() );
-  settings.setValue( "/Windows/Bookmarks/headerstate", lstBookmarks->header()->saveState() );
-}
-
-void QgsBookmarks::newBookmark()
-{
-  showBookmarks();
-  sInstance->addClicked();
-}
-
-void QgsBookmarks::showBookmarks()
-{
-  if ( !sInstance )
-  {
-    sInstance = new QgsBookmarks( QgisApp::instance() );
-    sInstance->setAttribute( Qt::WA_DeleteOnClose );
-  }
-
-  sInstance->show();
-  sInstance->raise();
-  sInstance->setWindowState( sInstance->windowState() & ~Qt::WindowMinimized );
-  sInstance->activateWindow();
+  QgsSettings settings;
+  settings.setValue( QStringLiteral( "Windows/Bookmarks/headerstateV2" ), lstBookmarks->header()->saveState() );
 }
 
 void QgsBookmarks::addClicked()
 {
-  QSqlTableModel *model = qobject_cast<QSqlTableModel *>( lstBookmarks->model() );
-  Q_ASSERT( model );
-
   QgsMapCanvas *canvas = QgisApp::instance()->mapCanvas();
   Q_ASSERT( canvas );
 
-  QSqlQuery query( "INSERT INTO tbl_bookmarks(bookmark_id,name,project_name,xmin,ymin,xmax,ymax,projection_srid)"
-                   "  VALUES (NULL,:name,:project_name,:xmin,:xmax,:ymin,:ymax,:projection_srid)",
-                   model->database() );
-
-  QString projStr( "" );
-  if ( QgsProject::instance() )
-  {
-    if ( !QgsProject::instance()->title().isEmpty() )
-    {
-      projStr = QgsProject::instance()->title();
-    }
-    else if ( !QgsProject::instance()->fileName().isEmpty() )
-    {
-      QFileInfo fi( QgsProject::instance()->fileName() );
-      projStr = fi.exists() ? fi.fileName() : "";
-    }
-  }
-
-  query.bindValue( ":name", tr( "New bookmark" ) );
-  query.bindValue( ":project_name", projStr );
-  query.bindValue( ":xmin", canvas->extent().xMinimum() );
-  query.bindValue( ":ymin", canvas->extent().yMinimum() );
-  query.bindValue( ":xmax", canvas->extent().xMaximum() );
-  query.bindValue( ":ymax", canvas->extent().yMaximum() );
-  query.bindValue( ":projection_srid", QVariant::fromValue( canvas->mapRenderer()->destinationCrs().srsid() ) );
-  if ( query.exec() )
-  {
-    model->setSort( 0, Qt::AscendingOrder );
-    model->select();
-    lstBookmarks->scrollToBottom();
-    lstBookmarks->setCurrentIndex( model->index( model->rowCount() - 1, 1 ) );
-    lstBookmarks->edit( model->index( model->rowCount() - 1, 1 ) );
-  }
-  else
-  {
-    QMessageBox::warning( this, tr( "Error" ), tr( "Unable to create the bookmark.\nDriver:%1\nDatabase:%2" )
-                          .arg( query.lastError().driverText() )
-                          .arg( query.lastError().databaseText() ) );
-  }
+  QgsBookmark bookmark;
+  bookmark.setName( tr( "New bookmark" ) );
+  bookmark.setExtent( QgsReferencedRectangle( canvas->extent(), canvas->mapSettings().destinationCrs() ) );
+  QgsBookmarkEditorDialog *dlg = new QgsBookmarkEditorDialog( bookmark, false, this, canvas );
+  dlg->setAttribute( Qt::WA_DeleteOnClose );
+  dlg->show();
 }
 
 void QgsBookmarks::deleteClicked()
 {
-  QList<int> rows;
-  foreach ( const QModelIndex &idx, lstBookmarks->selectionModel()->selectedIndexes() )
+  QItemSelection selection = lstBookmarks->selectionModel()->selection();
+  std::vector<int> rows;
+  for ( const auto &selectedIdx : selection.indexes() )
   {
-    if ( idx.column() == 1 )
-    {
-      rows << idx.row();
-    }
+    if ( selectedIdx.column() == 1 )
+      rows.push_back( selectedIdx.row() );
   }
 
   if ( rows.size() == 0 )
     return;
 
   // make sure the user really wants to delete these bookmarks
-  if ( QMessageBox::Cancel == QMessageBox::information( this, tr( "Really Delete?" ),
+  if ( QMessageBox::No == QMessageBox::question( this, tr( "Delete Bookmarks" ),
        tr( "Are you sure you want to delete %n bookmark(s)?", "number of rows", rows.size() ),
-       QMessageBox::Ok | QMessageBox::Cancel ) )
+       QMessageBox::Yes | QMessageBox::No ) )
     return;
 
-  int i = 0;
-  foreach ( int row, rows )
+  // Remove in reverse order to keep the merged model indexes
+  std::sort( rows.begin(), rows.end(), std::greater<int>() );
+
+  for ( const auto &row : rows )
   {
-    lstBookmarks->model()->removeRow( row - i );
-    i++;
+    mBookmarkModel->removeRow( row );
   }
 }
 
-void QgsBookmarks::on_lstBookmarks_doubleClicked( const QModelIndex & index )
+void QgsBookmarks::lstBookmarks_doubleClicked( const QModelIndex &index )
 {
-  Q_UNUSED( index );
+  Q_UNUSED( index )
   zoomToBookmark();
 }
 
@@ -224,30 +149,134 @@ void QgsBookmarks::zoomToBookmark()
   QModelIndex index = lstBookmarks->currentIndex();
   if ( !index.isValid() )
     return;
+  zoomToBookmarkIndex( index );
+}
 
-  double xmin = index.sibling( index.row(), 3 ).data().toDouble();
-  double ymin = index.sibling( index.row(), 4 ).data().toDouble();
-  double xmax = index.sibling( index.row(), 5 ).data().toDouble();
-  double ymax = index.sibling( index.row(), 6 ).data().toDouble();
-  int srid = index.sibling( index.row(), 7 ).data().toInt();
-
-  QgsRectangle rect = QgsRectangle( xmin, ymin, xmax, ymax );
-
-  // backwards compatibility, older version had -1 in the srid column
-  if ( srid > 0 &&
-       srid != QgisApp::instance()->mapCanvas()->mapRenderer()->destinationCrs().srsid() )
+void QgsBookmarks::zoomToBookmarkIndex( const QModelIndex &index )
+{
+  QgsReferencedRectangle rect = index.data( QgsBookmarkManagerModel::RoleExtent ).value< QgsReferencedRectangle >();
+  try
   {
-    QgsCoordinateTransform ct( QgsCoordinateReferenceSystem( srid, QgsCoordinateReferenceSystem::InternalCrsId ),
-                               QgisApp::instance()->mapCanvas()->mapRenderer()->destinationCrs() );
-    rect = ct.transform( rect );
-    if ( rect.isEmpty() )
+    if ( QgisApp::instance()->mapCanvas()->setReferencedExtent( rect ) )
     {
-      QMessageBox::warning( this, tr( "Empty extent" ), tr( "Reprojected extent is empty." ) );
-      return;
+      QgisApp::instance()->mapCanvas()->refresh();
+    }
+    else
+    {
+      QgisApp::instance()->messageBar()->pushWarning( tr( "Zoom to Bookmark" ), tr( "Bookmark extent is empty" ) );
+    }
+  }
+  catch ( QgsCsException & )
+  {
+    QgisApp::instance()->messageBar()->pushWarning( tr( "Zoom to Bookmark" ), tr( "Could not reproject bookmark extent to project CRS." ) );
+  }
+}
+
+void QgsBookmarks::importFromXml()
+{
+  QgsSettings settings;
+
+  QString lastUsedDir = settings.value( QStringLiteral( "Windows/Bookmarks/LastUsedDirectory" ), QDir::homePath() ).toString();
+  QString fileName = QFileDialog::getOpenFileName( this, tr( "Import Bookmarks" ), lastUsedDir,
+                     tr( "XML files (*.xml *.XML)" ) );
+  if ( fileName.isEmpty() )
+  {
+    return;
+  }
+
+  if ( !QgsApplication::bookmarkManager()->importFromFile( fileName ) )
+  {
+    QgisApp::instance()->messageBar()->pushWarning( tr( "Import Bookmarks" ), tr( "Error importing bookmark file" ) );
+  }
+  else
+  {
+    QgisApp::instance()->messageBar()->pushSuccess( tr( "Import Bookmarks" ), tr( "Bookmarks imported successfully" ) );
+  }
+}
+
+QMap<QString, QModelIndex> QgsBookmarks::getIndexMap()
+{
+  QMap<QString, QModelIndex> map;
+  int rowCount = mBookmarkModel->rowCount();
+
+  for ( int i = 0; i < rowCount; ++i )
+  {
+    QModelIndex idx = mBookmarkModel->index( i, QgsBookmarkManagerModel::ColumnName ); //Name col
+    if ( idx.isValid() )
+    {
+      QString name = idx.data( Qt::DisplayRole ).toString();
+      QString project = idx.sibling( idx.row(), QgsBookmarkManagerModel::ColumnGroup ).data().toString();
+      if ( !project.isEmpty() )
+      {
+        name = name + " (" + project + ")";
+      }
+      map.insert( name, idx ); //Duplicate name/project pairs are overwritten by subsequent bookmarks
     }
   }
 
-  // set the extent to the bookmark and refresh
-  QgisApp::instance()->setExtent( rect );
-  QgisApp::instance()->mapCanvas()->refresh();
+  return map;
+
+}
+
+void QgsBookmarks::exportToXml()
+{
+  QgsSettings settings;
+
+  QString lastUsedDir = settings.value( QStringLiteral( "Windows/Bookmarks/LastUsedDirectory" ), QDir::homePath() ).toString();
+  QString fileName = QFileDialog::getSaveFileName( this, tr( "Export Bookmarks" ), lastUsedDir,
+                     tr( "XML files (*.xml *.XML)" ) );
+  if ( fileName.isEmpty() )
+  {
+    return;
+  }
+
+  // ensure the user never omitted the extension from the file name
+  if ( !fileName.endsWith( QLatin1String( ".xml" ), Qt::CaseInsensitive ) )
+  {
+    fileName += QLatin1String( ".xml" );
+  }
+
+  if ( !QgsBookmarkManager::exportToFile( fileName, QList< const QgsBookmarkManager * >() << QgsApplication::bookmarkManager()
+                                          << QgsProject::instance()->bookmarkManager() ) )
+  {
+    QgisApp::instance()->messageBar()->pushWarning( tr( "Export Bookmarks" ), tr( "Error exporting bookmark file" ) );
+  }
+  else
+  {
+    QgisApp::instance()->messageBar()->pushSuccess( tr( "Export Bookmarks" ), tr( "Successfully exported bookmarks to <a href=\"%1\">%2</a>" )
+        .arg( QUrl::fromLocalFile( fileName ).toString(), QDir::toNativeSeparators( fileName ) ) );
+  }
+
+  settings.setValue( QStringLiteral( "Windows/Bookmarks/LastUsedDirectory" ), QFileInfo( fileName ).path() );
+}
+
+//
+// QgsDoubleSpinBoxBookmarksDelegate
+//
+
+QgsDoubleSpinBoxBookmarksDelegate::QgsDoubleSpinBoxBookmarksDelegate( QObject *parent )
+  : QStyledItemDelegate( parent )
+{
+
+}
+
+QString QgsDoubleSpinBoxBookmarksDelegate::displayText( const QVariant &value, const QLocale &locale ) const
+{
+  if ( value.userType() == QVariant::Double )
+  {
+    return locale.toString( value.toDouble(), 'f', QgsDoubleSpinBoxBookmarksDelegate::DECIMAL_PLACES );
+  }
+  else
+  {
+    return QStyledItemDelegate::displayText( value, locale );
+  }
+}
+
+QWidget *QgsDoubleSpinBoxBookmarksDelegate::createEditor( QWidget *parent, const QStyleOptionViewItem &option, const QModelIndex &index ) const
+{
+  QWidget *widget = QStyledItemDelegate::createEditor( parent, option, index );
+  QDoubleSpinBox *spinbox = qobject_cast<QDoubleSpinBox *>( widget );
+  if ( spinbox )
+    spinbox->setDecimals( QgsDoubleSpinBoxBookmarksDelegate::DECIMAL_PLACES );
+  return widget;
 }

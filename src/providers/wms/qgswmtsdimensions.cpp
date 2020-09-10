@@ -17,17 +17,18 @@
 
 #include "qgswmsprovider.h"
 #include "qgswmtsdimensions.h"
+#include "qgssettings.h"
+#include "qgsgui.h"
 
-#include <QSettings>
 #include <QComboBox>
 
-QgsWmtsDimensions::QgsWmtsDimensions( const QgsWmtsTileLayer &layer, QWidget *parent, Qt::WFlags fl )
-    : QDialog( parent, fl )
+QgsWmtsDimensions::QgsWmtsDimensions( const QgsWmtsTileLayer &layer, QWidget *parent, Qt::WindowFlags fl )
+  : QDialog( parent, fl )
 {
   setupUi( this );
 
   QStringList dims = layer.dimensions.keys();
-  qSort( dims );
+  std::sort( dims.begin(), dims.end() );
 
   mDimensions->setRowCount( dims.size() );
 
@@ -46,17 +47,7 @@ QgsWmtsDimensions::QgsWmtsDimensions( const QgsWmtsTileLayer &layer, QWidget *pa
     cb->setCurrentIndex( idx < 0 ? 0 : idx );
     mDimensions->setCellWidget( i, 4, cb );
   }
-
-  QSettings settings;
-  QgsDebugMsg( "restoring geometry" );
-  restoreGeometry( settings.value( "/Windows/WMTSDimensions/geometry" ).toByteArray() );
-}
-
-QgsWmtsDimensions::~QgsWmtsDimensions()
-{
-  QSettings settings;
-  QgsDebugMsg( "saving geometry" );
-  settings.setValue( "/Windows/WmtsDimensions/geometry", saveGeometry() );
+  QgsGui::enableAutoGeometryRestore( this );
 }
 
 void QgsWmtsDimensions::selectedDimensions( QHash<QString, QString> &selected )
@@ -67,6 +58,6 @@ void QgsWmtsDimensions::selectedDimensions( QHash<QString, QString> &selected )
   {
     QComboBox *cb = qobject_cast< QComboBox * >( mDimensions->cellWidget( i, 4 ) );
     Q_ASSERT( cb );
-    selected.insert( mDimensions->item( i, 0 )->text(),  cb->currentText() );
+    selected.insert( mDimensions->item( i, 0 )->text(), cb->currentText() );
   }
 }

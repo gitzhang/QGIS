@@ -18,20 +18,21 @@
 #ifndef QGSRASTERNULLER_H
 #define QGSRASTERNULLER_H
 
-#include "qgsrasterdataprovider.h"
+#include "qgis_core.h"
+#include "qgis_sip.h"
 #include "qgsrasterrange.h"
 #include "qgsrasterinterface.h"
 
 #include <QList>
 
-/** \ingroup core
+/**
+ * \ingroup core
   * Raster pipe that deals with null values.
 */
 class CORE_EXPORT QgsRasterNuller : public QgsRasterInterface
 {
   public:
-    QgsRasterNuller( QgsRasterInterface* input = 0 );
-    ~QgsRasterNuller();
+    QgsRasterNuller( QgsRasterInterface *input = nullptr );
 
     struct NoData
     {
@@ -39,25 +40,25 @@ class CORE_EXPORT QgsRasterNuller : public QgsRasterInterface
       double max;
     };
 
-    QgsRasterInterface * clone() const;
+    QgsRasterNuller *clone() const override SIP_FACTORY;
 
-    int bandCount() const;
+    int bandCount() const override;
 
-    QGis::DataType dataType( int bandNo ) const;
+    Qgis::DataType dataType( int bandNo ) const override;
 
-    QgsRasterBlock* block( int bandNo, const QgsRectangle &extent, int width, int height );
+    QgsRasterBlock *block( int bandNo, const QgsRectangle &extent, int width, int height, QgsRasterBlockFeedback *feedback = nullptr ) override SIP_FACTORY;
 
-    void setNoData( int bandNo, QgsRasterRangeList noData );
+    void setNoData( int bandNo, const QgsRasterRangeList &noData );
 
-    QgsRasterRangeList noData( int bandNo ) const { return mNoData.value( bandNo -1 ); }
+    QgsRasterRangeList noData( int bandNo ) const { return mNoData.value( bandNo - 1 ); }
 
-    /** \brief Set output no data value. */
+    //! Sets the output no data value.
     void setOutputNoDataValue( int bandNo, double noData );
 
   private:
-    // no data indext from 0
+    // no data indexed from 0
     QVector< QgsRasterRangeList > mNoData;
-    // no data to be set in output, indexed form 0
+    // no data to be set in output, indexed from 0
     QVector<double> mOutputNoData;
     QVector<bool> mHasOutputNoData;
 };

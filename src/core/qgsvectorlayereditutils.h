@@ -16,103 +16,240 @@
 #define QGSVECTORLAYEREDITUTILS_H
 
 
-#include "qgsfeature.h"
-
+#include "qgis_core.h"
+#include "qgis_sip.h"
+#include "qgsgeometry.h"
+#include "qgsfeatureid.h"
 #include "qgsvectorlayer.h"
 
-class QgsGeometryCache;
+class QgsCurve;
 
+/**
+ * \ingroup core
+ * \class QgsVectorLayerEditUtils
+ */
 class CORE_EXPORT QgsVectorLayerEditUtils
 {
   public:
-    QgsVectorLayerEditUtils( QgsVectorLayer* layer );
+    QgsVectorLayerEditUtils( QgsVectorLayer *layer );
 
-    inline QgsGeometryCache* cache() { return L->cache(); }
-
-
-    /** Insert a new vertex before the given vertex number,
-     *  in the given ring, item (first number is index 0), and feature
-     *  Not meaningful for Point geometries
+    /**
+     * Insert a new vertex before the given vertex number,
+     * in the given ring, item (first number is index 0), and feature
+     * Not meaningful for Point geometries
      */
     bool insertVertex( double x, double y, QgsFeatureId atFeatureId, int beforeVertex );
 
-    /** Moves the vertex at the given position number,
-     *  ring and item (first number is index 0), and feature
-     *  to the given coordinates
+    /**
+     * Inserts a new vertex before the given vertex number,
+     * in the given ring, item (first number is index 0), and feature
+     * Not meaningful for Point geometries
+     */
+    bool insertVertex( const QgsPoint &point, QgsFeatureId atFeatureId, int beforeVertex );
+
+    /**
+     * Moves the vertex at the given position number,
+     * ring and item (first number is index 0), and feature
+     * to the given coordinates
      */
     bool moveVertex( double x, double y, QgsFeatureId atFeatureId, int atVertex );
 
-    /** Deletes a vertex from a feature
+    /**
+     * Moves the vertex at the given position number,
+     * ring and item (first number is index 0), and feature
+     * to the given coordinates
+     * \note available in Python bindings as moveVertexV2
      */
-    bool deleteVertex( QgsFeatureId atFeatureId, int atVertex );
+    bool moveVertex( const QgsPoint &p, QgsFeatureId atFeatureId, int atVertex ) SIP_PYNAME( moveVertexV2 );
 
-    /** Adds a ring to polygon/multipolygon features
-     @return
-       0 in case of success,
-       1 problem with feature type,
-       2 ring not closed,
-       3 ring not valid,
-       4 ring crosses existing rings,
-       5 no feature found where ring can be inserted*/
-    int addRing( const QList<QgsPoint>& ring );
+    /**
+     * Deletes a vertex from a feature.
+     * \param featureId ID of feature to remove vertex from
+     * \param vertex index of vertex to delete
+     * \since QGIS 2.14
+     */
+    QgsVectorLayer::EditResult deleteVertex( QgsFeatureId featureId, int vertex );
 
-    /** Adds a new part polygon to a multipart feature
-     @return
-       0 in case of success,
-       1 if selected feature is not multipart,
-       2 if ring is not a valid geometry,
-       3 if new polygon ring not disjoint with existing rings,
-       4 if no feature was selected,
-       5 if several features are selected,
-       6 if selected geometry not found*/
-    int addPart( const QList<QgsPoint>& ring, QgsFeatureId featureId );
+    /**
+     * Adds a ring to polygon/multipolygon features
+     * \param ring ring to add
+     * \param targetFeatureIds if specified, only these features will be the candidates for adding a ring. Otherwise
+     * all intersecting features are tested and the ring is added to the first valid feature.
+     * \param modifiedFeatureId if specified, feature ID for feature that ring was added to will be stored in this parameter
+     * \return OperationResult result code: success or reason of failure
+     * \deprecated since QGIS 3.12 - will be removed in QGIS 4.0. Use the variant which accepts QgsPoint objects instead of QgsPointXY.
+     */
+    Q_DECL_DEPRECATED QgsGeometry::OperationResult addRing( const QVector<QgsPointXY> &ring, const QgsFeatureIds &targetFeatureIds = QgsFeatureIds(), QgsFeatureId *modifiedFeatureId = nullptr ) SIP_DEPRECATED;
 
-    /** Translates feature by dx, dy
-       @param featureId id of the feature to translate
-       @param dx translation of x-coordinate
-       @param dy translation of y-coordinate
-       @return 0 in case of success*/
+    /**
+     * Adds a ring to polygon/multipolygon features
+     * \param ring ring to add
+     * \param targetFeatureIds if specified, only these features will be the candidates for adding a ring. Otherwise
+     * all intersecting features are tested and the ring is added to the first valid feature.
+     * \param modifiedFeatureId if specified, feature ID for feature that ring was added to will be stored in this parameter
+     * \return OperationResult result code: success or reason of failure
+     */
+    QgsGeometry::OperationResult addRing( const QgsPointSequence &ring, const QgsFeatureIds &targetFeatureIds = QgsFeatureIds(), QgsFeatureId *modifiedFeatureId = nullptr );
+
+    /**
+     * Adds a ring to polygon/multipolygon features
+     * \param ring ring to add
+     * \param targetFeatureIds if specified, only these features will be the candidates for adding a ring. Otherwise
+     * all intersecting features are tested and the ring is added to the first valid feature.
+     * \param modifiedFeatureId if specified, feature ID for feature that ring was added to will be stored in this parameter
+     * \return OperationResult result code: success or reason of failure
+     * \note available in python bindings as addCurvedRing
+     */
+    QgsGeometry::OperationResult addRing( QgsCurve *ring, const QgsFeatureIds &targetFeatureIds = QgsFeatureIds(), QgsFeatureId *modifiedFeatureId = nullptr ) SIP_PYNAME( addCurvedRing );
+
+    /**
+     * Adds a new part polygon to a multipart feature
+     * \returns - QgsGeometry::Success
+     *
+     * - QgsGeometry::AddPartSelectedGeometryNotFound
+     * - QgsGeometry::AddPartNotMultiGeometry
+     * - QgsGeometry::InvalidBaseGeometry
+     * - QgsGeometry::InvalidInput
+     *
+     * \deprecated since QGIS 3.12 - will be removed in QGIS 4.0. Use the variant which accepts QgsPoint objects instead of QgsPointXY.
+     */
+    Q_DECL_DEPRECATED QgsGeometry::OperationResult addPart( const QVector<QgsPointXY> &ring, QgsFeatureId featureId ) SIP_DEPRECATED;
+
+    /**
+     * Adds a new part polygon to a multipart feature
+     *
+     * \returns - QgsGeometry::Success
+     *
+     * - QgsGeometry::AddPartSelectedGeometryNotFound
+     * - QgsGeometry::AddPartNotMultiGeometry
+     * - QgsGeometry::InvalidBaseGeometry
+     * - QgsGeometry::InvalidInput
+     *
+     * \note available in python bindings as addPartV2
+     */
+    QgsGeometry::OperationResult addPart( const QgsPointSequence &ring, QgsFeatureId featureId );
+
+    /**
+     * Adds a new part polygon to a multipart feature
+     *
+     * \returns - QgsGeometry::Success
+     *
+     * - QgsGeometry::AddPartSelectedGeometryNotFound
+     * - QgsGeometry::AddPartNotMultiGeometry
+     * - QgsGeometry::InvalidBaseGeometry
+     * - QgsGeometry::InvalidInput
+     *
+     * \note available in python bindings as addCurvedPart
+     */
+    QgsGeometry::OperationResult addPart( QgsCurve *ring, QgsFeatureId featureId ) SIP_PYNAME( addCurvedPart );
+
+    /**
+     * Translates feature by dx, dy
+     * \param featureId id of the feature to translate
+     * \param dx translation of x-coordinate
+     * \param dy translation of y-coordinate
+     * \return 0 in case of success
+     */
     int translateFeature( QgsFeatureId featureId, double dx, double dy );
 
-    /** Splits features cut by the given line
-     *  @param splitLine line that splits the layer features
-     *  @param topologicalEditing true if topological editing is enabled
-     *  @return
-     *   0 in case of success,
-     *   4 if there is a selection but no feature split
+    /**
+     * Splits parts cut by the given line
+     * \param splitLine line that splits the layer feature parts
+     * \param topologicalEditing TRUE if topological editing is enabled
+     * \returns  - QgsGeometry::InvalidBaseGeometry
+     *
+     * - QgsGeometry::Success
+     * - QgsGeometry::InvalidInput
+     * - QgsGeometry::NothingHappened if a selection is present but no feature has been split
+     * - QgsGeometry::InvalidBaseGeometry
+     * - QgsGeometry::GeometryEngineError
+     * - QgsGeometry::SplitCannotSplitPoint
+     *
+     * \deprecated since QGIS 3.12 - will be removed in QGIS 4.0. Use the variant which accepts QgsPoint objects instead of QgsPointXY.
      */
-    int splitFeatures( const QList<QgsPoint>& splitLine, bool topologicalEditing = false );
+    Q_DECL_DEPRECATED QgsGeometry::OperationResult splitParts( const QVector<QgsPointXY> &splitLine, bool topologicalEditing = false ) SIP_DEPRECATED;
 
-    /** Adds topological points for every vertex of the geometry.
-     * @param geom the geometry where each vertex is added to segments of other features
-     * @note geom is not going to be modified by the function
-     * @return 0 in case of success
+    /**
+     * Splits parts cut by the given line
+     * \param splitLine line that splits the layer feature parts
+     * \param topologicalEditing TRUE if topological editing is enabled
+     * \returns  - QgsGeometry::InvalidBaseGeometry
+     *
+     * - QgsGeometry::Success
+     * - QgsGeometry::InvalidInput
+     * - QgsGeometry::NothingHappened if a selection is present but no feature has been split
+     * - QgsGeometry::InvalidBaseGeometry
+     * - QgsGeometry::GeometryEngineError
+     * - QgsGeometry::SplitCannotSplitPoint
      */
-    int addTopologicalPoints( QgsGeometry* geom );
+    QgsGeometry::OperationResult splitParts( const QgsPointSequence &splitLine, bool topologicalEditing = false );
 
-    /** Adds a vertex to segments which intersect point p but don't
+    /**
+     * Splits features cut by the given line
+     * \param splitLine line that splits the layer features
+     * \param topologicalEditing TRUE if topological editing is enabled
+     * \returns 0 in case of success,
+     *  4 if there is a selection but no feature split
+     * \deprecated since QGIS 3.12 - will be removed in QGIS 4.0. Use the variant which accepts QgsPoint objects instead of QgsPointXY.
+     */
+    Q_DECL_DEPRECATED QgsGeometry::OperationResult splitFeatures( const QVector<QgsPointXY> &splitLine, bool topologicalEditing = false ) SIP_DEPRECATED;
+
+    /**
+     * Splits features cut by the given line
+     * \param splitLine line that splits the layer features
+     * \param topologicalEditing TRUE if topological editing is enabled
+     * \returns 0 in case of success,
+     *  4 if there is a selection but no feature split
+     */
+    QgsGeometry::OperationResult splitFeatures( const QgsPointSequence &splitLine, bool topologicalEditing = false );
+
+    /**
+     * Splits features cut by the given curve
+     * \param curve line that splits the layer features
+     * \param preserveCircular whether if circular strings are preserved after splitting
+     * \param topologicalEditing TRUE if topological editing is enabled
+     * \returns 0 in case of success,
+     *  4 if there is a selection but no feature split
+     * \since QGIS 3.16
+     */
+    QgsGeometry::OperationResult splitFeatures( const QgsCurve *curve, bool preserveCircular = false, bool topologicalEditing = false );
+
+    /**
+     * Adds topological points for every vertex of the geometry.
+     * \param geom the geometry where each vertex is added to segments of other features
+     * \return 0 in case of success
+     * \note geom is not going to be modified by the function
+     */
+    int addTopologicalPoints( const QgsGeometry &geom );
+
+    /**
+     * Adds a vertex to segments which intersect point \a p but don't
      * already have a vertex there. If a feature already has a vertex at position p,
      * no additional vertex is inserted. This method is useful for topological
      * editing.
-     * @param p position of the vertex
-     * @return 0 in case of success
+     * \return 0 in case of success
      */
-    int addTopologicalPoints( const QgsPoint& p );
+    int addTopologicalPoints( const QgsPointXY &p );
 
-    /** Inserts vertices to the snapped segments.
-     * This is useful for topological editing if snap to segment is enabled.
-     * @param snapResults results collected from the snapping operation
-     * @return 0 in case of success
+    /**
+     * Adds a vertex to segments which intersect point \a p but don't
+     * already have a vertex there. If a feature already has a vertex at position p,
+     * no additional vertex is inserted. This method is useful for topological
+     * editing.
+     * \return 0 in case of success
+     * \since QGIS 3.10
      */
-    int insertSegmentVerticesForSnap( const QList<QgsSnappingResult>& snapResults );
+    int addTopologicalPoints( const QgsPoint &p );
 
-  protected:
+  private:
 
-    /** Little helper function that gives bounding box from a list of points.
-    @return 0 in case of success */
-    int boundingBoxFromPointList( const QList<QgsPoint>& list, double& xmin, double& ymin, double& xmax, double& ymax ) const;
+    /**
+     * Little helper function that gives bounding box from a list of points.
+     * \returns TRUE in case of success
+     */
+    bool boundingBoxFromPointList( const QgsPointSequence &list, double &xmin, double &ymin, double &xmax, double &ymax ) const;
 
-    QgsVectorLayer* L;
+    QgsVectorLayer *mLayer = nullptr;
 };
 
 #endif // QGSVECTORLAYEREDITUTILS_H

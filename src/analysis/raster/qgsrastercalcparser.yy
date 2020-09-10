@@ -34,7 +34,7 @@
   extern char* rastertext;
   extern void set_raster_input_buffer(const char* buffer);
 
-  //! varible where the parser error will be stored
+  //! variable where the parser error will be stored
   QString rParserErrorMsg;
 
   //! sets gParserErrorMsg
@@ -56,6 +56,7 @@
 %token RASTER_BAND_REF
 %token<number> NUMBER
 %token<op> FUNCTION
+%token<op> FUNCTION_2_ARGS
 
 %type <node> root
 %type <node> raster_exp
@@ -79,6 +80,7 @@ root: raster_exp{}
 
 raster_exp:
   FUNCTION '(' raster_exp ')'   { $$ = new QgsRasterCalcNode($1, $3, 0); joinTmpNodes($$, $3, 0);}
+  | FUNCTION_2_ARGS '(' raster_exp ',' raster_exp ')' { $$ = new QgsRasterCalcNode($1, $3, $5); joinTmpNodes($$, $3, $5);}
   | raster_exp AND raster_exp   { $$ = new QgsRasterCalcNode( QgsRasterCalcNode::opAND, $1, $3 ); joinTmpNodes($$,$1,$3); }
   | raster_exp OR raster_exp   { $$ = new QgsRasterCalcNode( QgsRasterCalcNode::opOR, $1, $3 ); joinTmpNodes($$,$1,$3); }
   | raster_exp '=' raster_exp   { $$ = new QgsRasterCalcNode( QgsRasterCalcNode::opEQ, $1, $3 ); joinTmpNodes($$,$1,$3); }
@@ -110,17 +112,17 @@ void addToTmpNodes(QgsRasterCalcNode* node)
 void joinTmpNodes(QgsRasterCalcNode* parent, QgsRasterCalcNode* left, QgsRasterCalcNode* right)
 {
   bool res;
-  Q_UNUSED(res);
+  Q_UNUSED(res)
 
   if (left)
   {
-    res = gTmpNodes.removeAll(left);
+    res = gTmpNodes.removeAll(left) != 0;
     Q_ASSERT(res);
   }
 
   if (right)
   {
-    res = gTmpNodes.removeAll(right);
+    res = gTmpNodes.removeAll(right) != 0;
     Q_ASSERT(res);
   }
 
@@ -148,7 +150,7 @@ QgsRasterCalcNode* localParseRasterCalcString(const QString& str, QString& parse
     // remove nodes without parents - to prevent memory leaks
     while (gTmpNodes.size() > 0)
       delete gTmpNodes.takeFirst();
-    return NULL;
+    return nullptr;
   }
 }
 

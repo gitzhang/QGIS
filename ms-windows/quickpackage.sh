@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ###########################################################################
 #    quickpackage.sh
 #    ---------------------
 #    Date                 : November 2010
 #    Copyright            : (C) 2010 by Tim Sutton
-#    Email                : tim dot linfiniti at com
+#    Email                : tim at kartoza dot com
 ###########################################################################
 #                                                                         #
 #   This program is free software; you can redistribute it and/or modify  #

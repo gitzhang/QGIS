@@ -16,17 +16,17 @@ email                : jef at norbit dot de
  ***************************************************************************/
 
 #include "qgscolumntypethread.h"
+#include "qgspostgresconnpool.h"
 #include "qgslogger.h"
 
 #include <QMetaType>
 #include <climits>
 
-QgsGeomColumnTypeThread::QgsGeomColumnTypeThread( QString name, bool useEstimatedMetaData, bool allowGeometrylessTables )
-    : QThread()
-    , mConn( 0 )
-    , mName( name )
-    , mUseEstimatedMetadata( useEstimatedMetaData )
-    , mAllowGeometrylessTables( allowGeometrylessTables )
+QgsGeomColumnTypeThread::QgsGeomColumnTypeThread( const QString &name, bool useEstimatedMetaData, bool allowGeometrylessTables )
+  : mName( name )
+  , mUseEstimatedMetadata( useEstimatedMetaData )
+  , mAllowGeometrylessTables( allowGeometrylessTables )
+  , mStopped( false )
 {
   qRegisterMetaType<QgsPostgresLayerProperty>( "QgsPostgresLayerProperty" );
 }
@@ -42,11 +42,11 @@ void QgsGeomColumnTypeThread::stop()
 
 void QgsGeomColumnTypeThread::run()
 {
-  QgsDataSourceURI uri = QgsPostgresConn::connUri( mName );
-  mConn = QgsPostgresConn::connectDb( uri.connectionInfo(), true );
+  QgsDataSourceUri uri = QgsPostgresConn::connUri( mName );
+  mConn = QgsPostgresConnPool::instance()->acquireConnection( uri.connectionInfo( false ) );
   if ( !mConn )
   {
-    QgsDebugMsg( "Connection failed - " + uri.connectionInfo() );
+    QgsDebugMsg( "Connection failed - " + uri.connectionInfo( false ) );
     return;
   }
 
@@ -54,7 +54,7 @@ void QgsGeomColumnTypeThread::run()
 
   bool dontResolveType = QgsPostgresConn::dontResolveType( mName );
 
-  emit progressMessage( tr( "Retrieving tables of %1..." ).arg( mName ) );
+  emit progressMessage( tr( "Retrieving tables of %1…" ).arg( mName ) );
   QVector<QgsPostgresLayerProperty> layerProperties;
   if ( !mConn->supportedLayers( layerProperties,
                                 QgsPostgresConn::geometryColumnsOnly( mName ),
@@ -62,50 +62,52 @@ void QgsGeomColumnTypeThread::run()
                                 mAllowGeometrylessTables ) ||
        layerProperties.isEmpty() )
   {
+    QgsPostgresConnPool::instance()->releaseConnection( mConn );
+    mConn = nullptr;
     return;
   }
 
-  int i = 0, n = layerProperties.size();
-  for ( QVector<QgsPostgresLayerProperty>::iterator it = layerProperties.begin(),
-        end = layerProperties.end();
-        it != end; ++it )
+  int totalLayers = layerProperties.length();
+  int addedLayers = 0;
+
+  emit progress( addedLayers, totalLayers );
+
+  QVector<QgsPostgresLayerProperty *> unrestrictedLayers;
+
+  for ( auto &layerProperty : layerProperties )
   {
-    QgsPostgresLayerProperty& layerProperty = *it;
-    if ( !mStopped )
+    if ( !layerProperty.geometryColName.isNull() &&
+         ( layerProperty.types.value( 0, QgsWkbTypes::Unknown ) == QgsWkbTypes::Unknown ||
+           layerProperty.srids.value( 0, std::numeric_limits<int>::min() ) == std::numeric_limits<int>::min() ) )
     {
-      emit progress( i++, n );
-      emit progressMessage( tr( "Scanning column %1.%2.%3..." )
-                            .arg( layerProperty.schemaName )
-                            .arg( layerProperty.tableName )
-                            .arg( layerProperty.geometryColName ) );
-
-      if ( !layerProperty.geometryColName.isNull() &&
-           ( layerProperty.types.value( 0, QGis::WKBUnknown ) == QGis::WKBUnknown ||
-             layerProperty.srids.value( 0, INT_MIN ) == INT_MIN ) )
-      {
-        if ( dontResolveType )
-        {
-          QgsDebugMsg( QString( "skipping column %1.%2 without type constraint" ).arg( layerProperty.schemaName ).arg( layerProperty.tableName ) );
-          continue;
-        }
-
-        mConn->retrieveLayerTypes( layerProperty, mUseEstimatedMetadata );
-      }
+      unrestrictedLayers << &layerProperty;
     }
+  }
 
-    if ( mStopped )
-    {
-      layerProperty.types.clear();
-      layerProperty.srids.clear();
-    }
+  if ( mStopped )
+  {
+    emit progress( 0, 0 );
+    emit progressMessage( tr( "Table retrieval stopped." ) );
+    QgsPostgresConnPool::instance()->releaseConnection( mConn );
+    mConn = nullptr;
+    return;
+  }
 
-    // Now tell the layer list dialog box...
+  if ( ! dontResolveType )
+  {
+    mConn->retrieveLayerTypes( unrestrictedLayers, mUseEstimatedMetadata );
+  }
+
+  for ( const auto &layerProperty : layerProperties )
+  {
+    // Tell the layer list dialog box about the completed layers
     emit setLayerType( layerProperty );
+    emit progress( ++addedLayers, totalLayers );
   }
 
   emit progress( 0, 0 );
-  emit progressMessage( tr( "Table retrieval finished." ) );
+  emit progressMessage( mStopped ? tr( "Table retrieval stopped." ) : tr( "Table retrieval finished." ) );
 
-  mConn->disconnect();
-  mConn = 0;
+  QgsPostgresConnPool::instance()->releaseConnection( mConn );
+  mConn = nullptr;
 }

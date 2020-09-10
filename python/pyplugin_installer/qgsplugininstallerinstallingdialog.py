@@ -23,108 +23,153 @@
  *                                                                         *
  ***************************************************************************/
 """
+from builtins import str
 
-from PyQt4.QtCore import *
-from PyQt4.QtGui import *
+from qgis.PyQt.QtCore import QDir, QUrl, QFile, QCoreApplication
+from qgis.PyQt.QtWidgets import QDialog
+from qgis.PyQt.QtNetwork import QNetworkRequest, QNetworkReply
 
-from qgis.core import QgsApplication, QgsNetworkAccessManager
+import qgis
+from qgis.core import QgsNetworkAccessManager, QgsApplication, QgsNetworkRequestParameters
 
-from ui_qgsplugininstallerinstallingbase import Ui_QgsPluginInstallerInstallingDialogBase
-from installer_data import *
-from unzip import unzip
-
-
+from .ui_qgsplugininstallerinstallingbase import Ui_QgsPluginInstallerInstallingDialogBase
+from .installer_data import removeDir, repositories
+from .unzip import unzip
 
 
 class QgsPluginInstallerInstallingDialog(QDialog, Ui_QgsPluginInstallerInstallingDialogBase):
-  # ----------------------------------------- #
-  def __init__(self, parent, plugin):
-    QDialog.__init__(self, parent)
-    self.setupUi(self)
-    self.plugin = plugin
-    self.mResult = ""
-    self.progressBar.setRange(0,0)
-    self.progressBar.setFormat("%p%")
-    self.labelName.setText(plugin["name"])
-    self.buttonBox.clicked.connect(self.abort)
+    # ----------------------------------------- #
 
-    url = QUrl(plugin["download_url"])
+    def __init__(self, parent, plugin, stable=True):
+        QDialog.__init__(self, parent)
+        self.setupUi(self)
+        self.plugin = plugin
+        self.mResult = ""
+        self.progressBar.setRange(0, 0)
+        self.progressBar.setFormat("%p%")
+        self.labelName.setText(plugin["name"])
+        self.buttonBox.clicked.connect(self.abort)
 
-    fileName = plugin["filename"]
-    tmpDir = QDir.tempPath()
-    tmpPath = QDir.cleanPath(tmpDir+"/"+fileName)
-    self.file = QFile(tmpPath)
+        self.url = QUrl(plugin["download_url_stable"] if stable else plugin["download_url_experimental"])
+        self.redirectionCounter = 0
 
-    self.request = QNetworkRequest(url)
-    self.reply = QgsNetworkAccessManager.instance().get( self.request )
-    self.reply.downloadProgress.connect( self.readProgress )
-    self.reply.finished.connect(self.requestFinished)
+        fileName = plugin["filename"]
+        tmpDir = QDir.tempPath()
+        tmpPath = QDir.cleanPath(tmpDir + "/" + fileName)
+        self.file = QFile(tmpPath)
 
-    self.stateChanged(4)
+        self.requestDownloading()
 
-  # ----------------------------------------- #
-  def result(self):
-    return self.mResult
+    def requestDownloading(self):
+        self.request = QNetworkRequest(self.url)
+        self.request.setAttribute(QNetworkRequest.Attribute(QgsNetworkRequestParameters.AttributeInitiatorClass), "QgsPluginInstallerInstallingDialog")
+        authcfg = repositories.all()[self.plugin["zip_repository"]]["authcfg"]
+        if authcfg and isinstance(authcfg, str):
+            if not QgsApplication.authManager().updateNetworkRequest(
+                    self.request, authcfg.strip()):
+                self.mResult = self.tr(
+                    "Update of network request with authentication "
+                    "credentials FAILED for configuration '{0}'").format(authcfg)
+                self.request = None
 
+        if self.request is not None:
+            self.reply = QgsNetworkAccessManager.instance().get(self.request)
+            self.reply.downloadProgress.connect(self.readProgress)
+            self.reply.finished.connect(self.requestFinished)
 
-  # ----------------------------------------- #
-  def stateChanged(self, state):
-    messages=[self.tr("Installing..."),self.tr("Resolving host name..."),self.tr("Connecting..."),self.tr("Host connected. Sending request..."),self.tr("Downloading data..."),self.tr("Idle"),self.tr("Closing connection..."),self.tr("Error")]
-    self.labelState.setText(messages[state])
+            self.stateChanged(4)
 
+    def exec_(self):
+        if self.request is None:
+            return QDialog.Rejected
 
-  # ----------------------------------------- #
-  def readProgress(self, done, total):
-    if total > 0:
-        self.progressBar.setMaximum(total)
-        self.progressBar.setValue(done)
+        QDialog.exec_(self)
 
+    # ----------------------------------------- #
+    def result(self):
+        return self.mResult
 
-  # ----------------------------------------- #
-  def requestFinished(self):
-    reply = self.sender()
-    self.buttonBox.setEnabled(False)
-    if reply.error() != QNetworkReply.NoError:
-      self.mResult = reply.errorString()
-      if reply.error() == QNetworkReply.OperationCanceledError:
-        self.mResult += "<br/><br/>" + QCoreApplication.translate("QgsPluginInstaller", "If you haven't cancelled the download manually, it might be caused by a timeout. In this case consider increasing the connection timeout value in QGIS options.")
-      self.reject()
-      reply.deleteLater()
-      return
-    self.file.open(QFile.WriteOnly)
-    self.file.write( reply.readAll() )
-    self.file.close()
-    self.stateChanged(0)
-    reply.deleteLater()
-    pluginDir = QFileInfo(QgsApplication.qgisUserDbFilePath()).path() + "/python/plugins"
-    tmpPath = self.file.fileName()
-    # make sure that the parent directory exists
-    if not QDir(pluginDir).exists():
-      QDir().mkpath(pluginDir)
-    # if the target directory already exists as a link, remove the link without resolving:
-    QFile(pluginDir+unicode(QDir.separator())+self.plugin["id"]).remove()
-    try:
-      unzip(unicode(tmpPath), unicode(pluginDir)) # test extract. If fails, then exception will be raised and no removing occurs
-      # removing old plugin files if exist
-      removeDir(QDir.cleanPath(pluginDir+"/"+self.plugin["id"])) # remove old plugin if exists
-      unzip(unicode(tmpPath), unicode(pluginDir)) # final extract.
-    except:
-      self.mResult = self.tr("Failed to unzip the plugin package. Probably it's broken or missing from the repository. You may also want to make sure that you have write permission to the plugin directory:") + "\n" + pluginDir
-      self.reject()
-      return
-    try:
-      # cleaning: removing the temporary zip file
-      QFile(tmpPath).remove()
-    except:
-      pass
-    self.close()
+    # ----------------------------------------- #
+    def stateChanged(self, state):
+        messages = [
+            QCoreApplication.translate('QgsPluginInstallerInstallingDialog', "Installing…"),
+            QCoreApplication.translate('QgsPluginInstallerInstallingDialog', "Resolving host name…"),
+            QCoreApplication.translate('QgsPluginInstallerInstallingDialog', "Connecting…"),
+            QCoreApplication.translate('QgsPluginInstallerInstallingDialog', "Host connected. Sending request…"),
+            QCoreApplication.translate('QgsPluginInstallerInstallingDialog', "Downloading data…"),
+            self.tr("Idle"),
+            QCoreApplication.translate('QgsPluginInstallerInstallingDialog', "Closing connection…"),
+            self.tr("Error")
+        ]
+        self.labelState.setText(messages[state])
 
+    # ----------------------------------------- #
+    def readProgress(self, done, total):
+        if total > 0:
+            self.progressBar.setMaximum(total)
+            self.progressBar.setValue(done)
 
-  # ----------------------------------------- #
-  def abort(self):
-    if self.reply.isRunning():
-      self.reply.finished.disconnect()
-      self.reply.abort()
-      del self.reply
-    self.mResult = self.tr("Aborted by user")
-    self.reject()
+    # ----------------------------------------- #
+    def requestFinished(self):
+        reply = self.sender()
+        self.buttonBox.setEnabled(False)
+        if reply.error() != QNetworkReply.NoError:
+            self.mResult = reply.errorString()
+            if reply.error() == QNetworkReply.OperationCanceledError:
+                self.mResult += "<br/><br/>" + QCoreApplication.translate("QgsPluginInstaller", "If you haven't canceled the download manually, it might be caused by a timeout. In this case consider increasing the connection timeout value in QGIS options.")
+            self.reject()
+            reply.deleteLater()
+            return
+        elif reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) in (301, 302):
+            redirectionUrl = reply.attribute(QNetworkRequest.RedirectionTargetAttribute)
+            self.redirectionCounter += 1
+            if self.redirectionCounter > 4:
+                self.mResult = QCoreApplication.translate("QgsPluginInstaller", "Too many redirections")
+                self.reject()
+                reply.deleteLater()
+                return
+            else:
+                if redirectionUrl.isRelative():
+                    redirectionUrl = reply.url().resolved(redirectionUrl)
+                # Fire a new request and exit immediately in order to quietly destroy the old one
+                self.url = redirectionUrl
+                self.requestDownloading()
+                reply.deleteLater()
+                return
+
+        self.file.open(QFile.WriteOnly)
+        self.file.write(reply.readAll())
+        self.file.close()
+        self.stateChanged(0)
+        reply.deleteLater()
+        pluginDir = qgis.utils.home_plugin_path
+        tmpPath = self.file.fileName()
+        # make sure that the parent directory exists
+        if not QDir(pluginDir).exists():
+            QDir().mkpath(pluginDir)
+        # if the target directory already exists as a link, remove the link without resolving:
+        QFile(pluginDir + str(QDir.separator()) + self.plugin["id"]).remove()
+        try:
+            unzip(str(tmpPath), str(pluginDir))  # test extract. If fails, then exception will be raised and no removing occurs
+            # removing old plugin files if exist
+            removeDir(QDir.cleanPath(pluginDir + "/" + self.plugin["id"]))  # remove old plugin if exists
+            unzip(str(tmpPath), str(pluginDir))  # final extract.
+        except:
+            self.mResult = self.tr("Failed to unzip the plugin package. Probably it's broken or missing from the repository. You may also want to make sure that you have write permission to the plugin directory:") + "\n" + pluginDir
+            self.reject()
+            return
+        try:
+            # cleaning: removing the temporary zip file
+            QFile(tmpPath).remove()
+        except:
+            pass
+        self.close()
+
+    # ----------------------------------------- #
+    def abort(self):
+        if self.reply.isRunning():
+            self.reply.finished.disconnect()
+            self.reply.abort()
+            del self.reply
+        self.mResult = self.tr("Aborted by user")
+        self.reject()

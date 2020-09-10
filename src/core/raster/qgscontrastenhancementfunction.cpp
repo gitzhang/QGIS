@@ -17,70 +17,71 @@ email                : ersts@amnh.org
  ***************************************************************************/
 
 #include "qgscontrastenhancementfunction.h"
+#include "qgscontrastenhancement.h"
 
-QgsContrastEnhancementFunction::QgsContrastEnhancementFunction( QGis::DataType theDataType, double theMinimumValue, double theMaximumValue )
+QgsContrastEnhancementFunction::QgsContrastEnhancementFunction( Qgis::DataType dataType, double minimumValue, double maximumValue )
+  : mMaximumValue( maximumValue )
+  , mMinimumValue( minimumValue )
+  , mMinimumMaximumRange( mMaximumValue - mMinimumValue )
+  , mQgsRasterDataType( dataType )
+  , mMaximumValuePossible( QgsContrastEnhancement::maximumValuePossible( mQgsRasterDataType ) )
+  , mMinimumValuePossible( QgsContrastEnhancement::minimumValuePossible( mQgsRasterDataType ) )
 {
-  mQgsRasterDataType = theDataType;
-  mMaximumValue = theMaximumValue;
-  mMinimumValue = theMinimumValue;
-  mMinimumMaximumRange = mMaximumValue - mMinimumValue;
 }
 
-QgsContrastEnhancementFunction::QgsContrastEnhancementFunction( const QgsContrastEnhancementFunction& f )
+QgsContrastEnhancementFunction::QgsContrastEnhancementFunction( const QgsContrastEnhancementFunction &f )
+  : mMaximumValue( f.mMaximumValue )
+  , mMinimumValue( f.mMinimumValue )
+  , mMinimumMaximumRange( f.mMinimumMaximumRange )
+  , mQgsRasterDataType( f.mQgsRasterDataType )
+  , mMaximumValuePossible( f.mMaximumValuePossible )
+  , mMinimumValuePossible( f.mMinimumValuePossible )
 {
-  mQgsRasterDataType = f.mQgsRasterDataType;
-  mMaximumValue = f.mMaximumValue;
-  mMinimumValue = f.mMinimumValue;
-  mMinimumMaximumRange = f.mMinimumMaximumRange;
 }
 
-int QgsContrastEnhancementFunction::enhance( double theValue )
+int QgsContrastEnhancementFunction::enhance( double value )
 {
-  if ( mQgsRasterDataType == QGis::Byte )
+  if ( mQgsRasterDataType == Qgis::Byte )
   {
-    return static_cast<int>( theValue );
+    return static_cast<int>( value );
   }
   else
   {
-    return static_cast<int>(((( theValue - QgsContrastEnhancement::minimumValuePossible( mQgsRasterDataType ) ) / ( QgsContrastEnhancement::maximumValuePossible( mQgsRasterDataType ) - QgsContrastEnhancement::minimumValuePossible( mQgsRasterDataType ) ) )*255.0 ) );
+    return static_cast<int>( ( ( ( value - mMinimumValuePossible ) / ( mMaximumValuePossible - mMinimumValuePossible ) ) * 255.0 ) );
   }
 }
 
-bool QgsContrastEnhancementFunction::isValueInDisplayableRange( double theValue )
+bool QgsContrastEnhancementFunction::isValueInDisplayableRange( double value )
 {
   //A default check is to see if the provided value is with the range for the data type
-  if ( theValue < QgsContrastEnhancement::minimumValuePossible( mQgsRasterDataType ) || theValue > QgsContrastEnhancement::maximumValuePossible( mQgsRasterDataType ) )
-  {
-    return false;
-  }
-
-  return true;
+  // Write the test as ( v >= min && v <= max ) so that v = NaN returns false
+  return value >= mMinimumValuePossible && value <= mMaximumValuePossible;
 }
 
-void QgsContrastEnhancementFunction::setMaximumValue( double theValue )
+void QgsContrastEnhancementFunction::setMaximumValue( double value )
 {
-  if ( QgsContrastEnhancement::maximumValuePossible( mQgsRasterDataType ) < theValue )
+  if ( mMaximumValuePossible < value )
   {
-    mMaximumValue = QgsContrastEnhancement::maximumValuePossible( mQgsRasterDataType );
+    mMaximumValue = mMaximumValuePossible;
   }
   else
   {
-    mMaximumValue = theValue;
+    mMaximumValue = value;
   }
 
   mMinimumMaximumRange = mMaximumValue - mMinimumValue;
 }
 
-void QgsContrastEnhancementFunction::setMinimumValue( double theValue )
+void QgsContrastEnhancementFunction::setMinimumValue( double value )
 {
 
-  if ( QgsContrastEnhancement::minimumValuePossible( mQgsRasterDataType ) > theValue )
+  if ( mMinimumValuePossible > value )
   {
-    mMinimumValue = QgsContrastEnhancement::minimumValuePossible( mQgsRasterDataType );
+    mMinimumValue = mMinimumValuePossible;
   }
   else
   {
-    mMinimumValue = theValue;
+    mMinimumValue = value;
   }
 
   mMinimumMaximumRange = mMaximumValue - mMinimumValue;

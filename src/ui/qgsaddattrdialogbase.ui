@@ -6,12 +6,12 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>267</width>
-    <height>235</height>
+    <width>245</width>
+    <height>201</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Add column</string>
+   <string>Add Field</string>
   </property>
   <property name="modal">
    <bool>true</bool>
@@ -56,6 +56,13 @@
    <item row="2" column="1">
     <widget class="QComboBox" name="mTypeBox"/>
    </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="label">
+     <property name="text">
+      <string>Provider type</string>
+     </property>
+    </widget>
+   </item>
    <item row="3" column="1">
     <widget class="QLabel" name="mTypeName">
      <property name="text">
@@ -67,9 +74,12 @@
     </widget>
    </item>
    <item row="4" column="0">
-    <widget class="QLabel" name="textLabel2_2">
+    <widget class="QLabel" name="mLengthLabel">
+     <property name="toolTip">
+      <string>Total length of field (including the number of digits after the decimal place for decimal fields).&lt;br&gt;For example 123.45 requires a decimal field length of 5, and 123456 requires an integer field length of 6.</string>
+     </property>
      <property name="text">
-      <string>Width</string>
+      <string>Length</string>
      </property>
      <property name="buddy">
       <cstring>mLength</cstring>
@@ -77,10 +87,17 @@
     </widget>
    </item>
    <item row="4" column="1">
-    <widget class="QSpinBox" name="mLength"/>
+    <widget class="QSpinBox" name="mLength">
+     <property name="toolTip">
+      <string>Total length of field (including the number of digits after the decimal place for decimal fields).&lt;br&gt;For example 123.45 requires a decimal field length of 5, and 123456 requires an integer field length of 6.</string>
+     </property>
+    </widget>
    </item>
    <item row="5" column="0">
-    <widget class="QLabel" name="textLabel2_3">
+    <widget class="QLabel" name="mPrecLabel">
+     <property name="toolTip">
+      <string>Maximum number of digits after the decimal place. For example 123.45 requires a field precision of 2.</string>
+     </property>
      <property name="text">
       <string>Precision</string>
      </property>
@@ -90,9 +107,26 @@
     </widget>
    </item>
    <item row="5" column="1">
-    <widget class="QSpinBox" name="mPrec"/>
+    <widget class="QSpinBox" name="mPrec">
+     <property name="toolTip">
+      <string>Maximum number of digits after the decimal place. For example 123.45 requires a field precision of 2.</string>
+     </property>
+    </widget>
    </item>
    <item row="6" column="1">
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item row="7" column="1">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="standardButtons">
       <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
@@ -108,7 +142,6 @@
   <tabstop>mTypeBox</tabstop>
   <tabstop>mLength</tabstop>
   <tabstop>mPrec</tabstop>
-  <tabstop>buttonBox</tabstop>
  </tabstops>
  <resources/>
  <connections>

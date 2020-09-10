@@ -32,81 +32,85 @@ class QgsPythonUtilsImpl : public QgsPythonUtils
 
     QgsPythonUtilsImpl();
 
-    virtual ~QgsPythonUtilsImpl();
+    ~QgsPythonUtilsImpl() override;
 
     /* general purpose functions */
 
-    //! initialize python and import bindings
-    void initPython( QgisInterface* interface );
+    void initPython( QgisInterface *interface, bool installErrorHook ) override;
+#ifdef HAVE_SERVER_PYTHON_PLUGINS
+    void initServerPython( QgsServerInterface *interface ) override;
+    bool startServerPlugin( QString packageName ) override;
+#endif
+    void exitPython() override;
+    bool isEnabled() override;
+    bool runString( const QString &command, QString msgOnError = QString(), bool single = true ) override;
+    QString runStringUnsafe( const QString &command, bool single = true ) override; // returns error traceback on failure, empty QString on success
+    bool evalString( const QString &command, QString &result ) override;
+    bool getError( QString &errorClassName, QString &errorText ) override;
 
-    //! close python interpreter
-    void exitPython();
+    /**
+     * Returns the path where QGIS Python related files are located.
+     */
+    QString pythonPath() const;
 
-    //! returns true if python support is ready to use (must be inited first)
-    bool isEnabled();
-
-    //! returns path where QGIS python stuff is located
-    QString pythonPath();
-
-    //! run a statement (wrapper for PyRun_String)
-    //! this command is more advanced as enables error checking etc.
-    //! when an exception is raised, it shows dialog with exception details
-    //! @return true if no error occured
-    bool runString( const QString& command, QString msgOnError = QString(), bool single = true );
-
-    //! run a statement, error reporting is not done
-    //! @return true if no error occured
-    bool runStringUnsafe( const QString& command, bool single = true );
-
-    bool evalString( const QString& command, QString& result );
-
-    //! @return object's type name as a string
-    QString getTypeAsString( PyObject* obj );
-
-    //! get information about error to the supplied arguments
-    //! @return false if there was no python error
-    bool getError( QString& errorClassName, QString& errorText );
+    /**
+     * Returns an object's type name as a string
+     */
+    QString getTypeAsString( PyObject *obj );
 
     /* plugins related functions */
 
-    //! return current path for python plugins
-    QString pluginsPath();
+    /**
+     * Returns the current path for Python plugins
+     */
+    QString pluginsPath() const;
 
-    //! return current path for python in home directory
-    QString homePythonPath();
+    /**
+     * Returns the current path for Python in home directory.
+     */
+    QString homePythonPath() const;
 
-    //! return current path for home directory python plugins
-    QString homePluginsPath();
+    /**
+     * Returns the current path for home directory Python plugins.
+     */
+    QString homePluginsPath() const;
 
-    //! return a list of extra plugins paths passed with QGIS_PLUGINPATH environment variable
-    QStringList extraPluginsPaths();
+    /**
+     * Returns a list of extra plugins paths passed with QGIS_PLUGINPATH environment variable.
+     */
+    QStringList extraPluginsPaths() const;
 
-    //! return list of all available python plugins
-    QStringList pluginList();
-
-    //! return whether the plugin is loaded (active)
-    virtual bool isPluginLoaded( QString packageName );
-
-    //! return a list of active plugins
-    virtual QStringList listActivePlugins();
-
-    //! load python plugin (import)
-    bool loadPlugin( QString packageName );
-
-    //! start plugin: add to active plugins and call initGui()
-    bool startPlugin( QString packageName );
-
-    //! helper function to get some information about plugin
-    //! @param function one of these strings: name, tpye, version, description
-    QString getPluginMetadata( QString pluginName, QString function );
-
-    //! confirm it is safe to uninstall the plugin
-    bool canUninstallPlugin( QString packageName );
-
-    //! unload plugin
-    bool unloadPlugin( QString packageName );
+    QStringList pluginList() override;
+    bool isPluginLoaded( const QString &packageName ) override;
+    QStringList listActivePlugins() override;
+    bool loadPlugin( const QString &packageName ) override;
+    bool startPlugin( const QString &packageName ) override;
+    bool startProcessingPlugin( const QString &packageName ) override;
+    QString getPluginMetadata( const QString &pluginName, const QString &function ) override;
+    bool pluginHasProcessingProvider( const QString &pluginName ) override;
+    bool canUninstallPlugin( const QString &packageName ) override;
+    bool unloadPlugin( const QString &packageName ) override;
+    bool isPluginEnabled( const QString &packageName ) const override;
 
   protected:
+
+    /* functions that do the initialization work */
+
+    //! initialize Python context
+    void init();
+
+    //! check qgis imports and plugins
+    //\returns true if all imports worked
+    bool checkSystemImports();
+
+    //\returns true if qgis.user could be imported
+    bool checkQgisUser();
+
+    //! import custom user and global Python code (startup scripts)
+    void doCustomImports();
+
+    //! cleanup Python context
+    void finish();
 
     void installErrorHook();
 
@@ -114,18 +118,21 @@ class QgsPythonUtilsImpl : public QgsPythonUtils
 
     QString getTraceback();
 
-    //! convert python object to QString. If the object isn't unicode/str, it will be converted
-    QString PyObjectToQString( PyObject* obj );
+    //! convert Python object to QString. If the object isn't unicode/str, it will be converted
+    QString PyObjectToQString( PyObject *obj );
 
     //! reference to module __main__
-    PyObject* mMainModule;
+    PyObject *mMainModule = nullptr;
 
     //! dictionary of module __main__
-    PyObject* mMainDict;
+    PyObject *mMainDict = nullptr;
 
-    //! flag determining that python support is enabled
-    bool mPythonEnabled;
+    //! flag determining that Python support is enabled
+    bool mPythonEnabled = false;
+
+  private:
+
+    bool mErrorHookInstalled = false;
 };
-
 
 #endif

@@ -16,41 +16,43 @@
 #define QGSOWSDATAITEMS_H
 
 #include "qgsdataitem.h"
-#include "qgsdatasourceuri.h"
+#include "qgswkbtypes.h"
+#include "qgsdataitemprovider.h"
+
 class QgsOWSConnectionItem : public QgsDataCollectionItem
 {
     Q_OBJECT
   public:
-    QgsOWSConnectionItem( QgsDataItem* parent, QString name, QString path );
-    ~QgsOWSConnectionItem();
+    QgsOWSConnectionItem( QgsDataItem *parent, QString name, QString path );
 
-    QVector<QgsDataItem*> createChildren();
-    virtual bool equal( const QgsDataItem *other );
+    QVector<QgsDataItem *> createChildren() override;
+    bool equal( const QgsDataItem *other ) override;
 
-    virtual QList<QAction*> actions();
-
-  public slots:
-    void editConnection();
-    void deleteConnection();
+  private:
+    void replacePath( QgsDataItem *item, QString before, QString after );
 };
 
-class QgsOWSRootItem : public QgsDataCollectionItem
+class QgsOWSRootItem : public QgsConnectionsRootItem
 {
     Q_OBJECT
   public:
-    QgsOWSRootItem( QgsDataItem* parent, QString name, QString path );
-    ~QgsOWSRootItem();
+    QgsOWSRootItem( QgsDataItem *parent, QString name, QString path );
 
-    QVector<QgsDataItem*> createChildren();
+    QVector<QgsDataItem *> createChildren() override;
 
-    virtual QList<QAction*> actions();
+    QVariant sortKey() const override { return 11; }
 
-    virtual QWidget * paramWidget();
+};
 
-  public slots:
-    void connectionsChanged();
+//! Provider for OWS data item
+class QgsOwsDataItemProvider : public QgsDataItemProvider
+{
+  public:
+    QString name() override;
 
-    void newConnection();
+    int capabilities() const override;
+
+    QgsDataItem *createDataItem( const QString &pathIn, QgsDataItem *parentItem ) override;
 };
 
 #endif // QGSOWSDATAITEMS_H

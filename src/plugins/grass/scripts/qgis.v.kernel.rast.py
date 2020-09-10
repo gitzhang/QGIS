@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
@@ -21,8 +21,6 @@
 __author__ = 'Radim Blazek'
 __date__ = 'February 2010'
 __copyright__ = '(C) 2010, Radim Blazek'
-# This will get replaced with a git SHA1 when you do a git archive
-__revision__ = '$Format:%H$'
 
 
 ############################################################################
@@ -62,23 +60,22 @@ __revision__ = '$Format:%H$'
 #% required : yes
 #%end
 
-import sys
-import os
-import string
 try:
     from grass.script import core as grass
 except ImportError:
     import grass
 except:
-    raise Exception ("Cannot find 'grass' Python module. Python is supported by GRASS from version >= 6.4" )
+    raise Exception("Cannot find 'grass' Python module. Python is supported by GRASS from version >= 6.4")
+
 
 def main():
     input = options['input']
     output = options['output']
     stddeviation = options['stddeviation']
 
-    if grass.run_command('v.kernel', input=input, stddeviation=stddeviation, output=output ) != 0:
-         grass.fatal("Cannot run v.kernel.")
+    if grass.run_command('v.kernel', input=input, stddeviation=stddeviation, output=output) != 0:
+        grass.fatal("Cannot run v.kernel.")
+
 
 if __name__ == "__main__":
     options, flags = grass.parser()

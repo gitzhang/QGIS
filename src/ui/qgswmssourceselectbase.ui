@@ -6,16 +6,16 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>773</width>
-    <height>539</height>
+    <width>744</width>
+    <height>595</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Add Layer(s) from a Server</string>
+   <string>Add Layer(s) from a WM(T)S Server</string>
   </property>
   <property name="windowIcon">
    <iconset>
-    <normaloff>../../../../.designer/backup</normaloff>../../../../.designer/backup</iconset>
+    <normaloff>.</normaloff>.</iconset>
   </property>
   <property name="sizeGripEnabled">
    <bool>true</bool>
@@ -27,11 +27,11 @@
    <item row="3" column="0">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="standardButtons">
-      <set>QDialogButtonBox::Close|QDialogButtonBox::Help</set>
+      <set>QDialogButtonBox::Help</set>
      </property>
     </widget>
    </item>
-   <item row="4" column="0">
+   <item row="2" column="0">
     <widget class="QLabel" name="labelStatus">
      <property name="sizePolicy">
       <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
@@ -47,6 +47,23 @@
      </property>
     </widget>
    </item>
+   <item row="1" column="0">
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <widget class="QLabel" name="label">
+       <property name="text">
+        <string>Layer name</string>
+       </property>
+       <property name="buddy">
+        <cstring>leLayerName</cstring>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="leLayerName"/>
+     </item>
+    </layout>
+   </item>
    <item row="0" column="0">
     <widget class="QTabWidget" name="tabServers">
      <property name="enabled">
@@ -60,73 +77,200 @@
        <string>Layers</string>
       </attribute>
       <layout class="QGridLayout" name="gridLayout">
-       <item row="0" column="0" colspan="12">
+       <item row="1" column="0">
+        <layout class="QHBoxLayout" name="horizontalLayout_2">
+         <item>
+          <widget class="QPushButton" name="btnConnect">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="toolTip">
+            <string>Connect to selected service</string>
+           </property>
+           <property name="text">
+            <string>C&amp;onnect</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnNew">
+           <property name="toolTip">
+            <string>Create a new service connection</string>
+           </property>
+           <property name="text">
+            <string>&amp;New</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnEdit">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="toolTip">
+            <string>Edit selected service connection</string>
+           </property>
+           <property name="text">
+            <string>Edit</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnDelete">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="toolTip">
+            <string>Remove connection to selected service</string>
+           </property>
+           <property name="text">
+            <string>Remove</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="horizontalSpacer_2">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>8</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnLoad">
+           <property name="toolTip">
+            <string>Load connections from file</string>
+           </property>
+           <property name="text">
+            <string>Load</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnSave">
+           <property name="toolTip">
+            <string>Save connections to file</string>
+           </property>
+           <property name="text">
+            <string>Save</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item row="0" column="0">
         <widget class="QComboBox" name="cmbConnections"/>
        </item>
-       <item row="1" column="0" colspan="2">
-        <widget class="QPushButton" name="btnConnect">
-         <property name="enabled">
-          <bool>false</bool>
+       <item row="5" column="0">
+        <widget class="QGroupBox" name="btnGrpImageEncoding">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
          </property>
-         <property name="text">
-          <string>C&amp;onnect</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="2" colspan="2">
-        <widget class="QPushButton" name="btnNew">
-         <property name="text">
-          <string>&amp;New</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="4">
-        <widget class="QPushButton" name="btnEdit">
-         <property name="enabled">
-          <bool>false</bool>
-         </property>
-         <property name="text">
-          <string>Edit</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="5">
-        <widget class="QPushButton" name="btnDelete">
-         <property name="enabled">
-          <bool>false</bool>
-         </property>
-         <property name="text">
-          <string>Delete</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="7">
-        <spacer name="horizontalSpacer_2">
-         <property name="orientation">
-          <enum>Qt::Horizontal</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
+         <property name="minimumSize">
           <size>
-           <width>8</width>
-           <height>20</height>
+           <width>16</width>
+           <height>64</height>
           </size>
          </property>
-        </spacer>
-       </item>
-       <item row="1" column="11">
-        <widget class="QPushButton" name="btnAddDefault">
-         <property name="statusTip">
-          <string>Adds a few example WMS servers</string>
-         </property>
-         <property name="whatsThis">
-          <string comment="Adds several example WMS servers to the list"/>
-         </property>
-         <property name="text">
-          <string>Add default servers</string>
+         <property name="title">
+          <string>Image Encoding</string>
          </property>
         </widget>
        </item>
-       <item row="2" column="0" colspan="12">
+       <item row="6" column="0">
+        <widget class="QGroupBox" name="gbCRS">
+         <property name="title">
+          <string>Options</string>
+         </property>
+         <layout class="QGridLayout">
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_2">
+            <property name="text">
+             <string>Tile size</string>
+            </property>
+            <property name="buddy">
+             <cstring>mTileWidth</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="0">
+           <widget class="QCheckBox" name="mContextualLegendCheckbox">
+            <property name="text">
+             <string>Use contextual WMS Legend</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0" colspan="2">
+           <widget class="QLabel" name="label_3">
+            <property name="text">
+             <string>Feature limit for GetFeatureInfo</string>
+            </property>
+            <property name="buddy">
+             <cstring>mFeatureCount</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="mTileWidth"/>
+          </item>
+          <item row="3" column="2">
+           <widget class="QLineEdit" name="mFeatureCount">
+            <property name="text">
+             <string>10</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="2">
+           <widget class="QPushButton" name="btnChangeSpatialRefSys">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="text">
+             <string>Change…</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0" colspan="2">
+           <widget class="QLabel" name="labelCoordRefSys">
+            <property name="text">
+             <string>Coordinate Reference System</string>
+            </property>
+            <property name="buddy">
+             <cstring>btnChangeSpatialRefSys</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="2">
+           <widget class="QLineEdit" name="mTileHeight"/>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_4">
+            <property name="text">
+             <string>Request step size</string>
+            </property>
+            <property name="buddy">
+             <cstring>mTileWidth</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="mStepWidth"/>
+          </item>
+          <item row="2" column="2">
+           <widget class="QLineEdit" name="mStepHeight"/>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item row="4" column="0">
         <widget class="QTreeWidget" name="lstLayers">
          <property name="sizePolicy">
           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
@@ -162,119 +306,38 @@
          </column>
         </widget>
        </item>
-       <item row="3" column="0" colspan="12">
-        <widget class="QGroupBox" name="btnGrpImageEncoding">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="minimumSize">
-          <size>
-           <width>16</width>
-           <height>64</height>
-          </size>
-         </property>
-         <property name="title">
-          <string>Image encoding</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="9">
-        <widget class="QPushButton" name="btnSave">
-         <property name="toolTip">
-          <string>Save connections to file</string>
-         </property>
-         <property name="text">
-          <string>Save</string>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="8">
-        <widget class="QPushButton" name="btnLoad">
-         <property name="toolTip">
-          <string>Load connections from file</string>
-         </property>
-         <property name="text">
-          <string>Load</string>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="0" colspan="12">
-        <widget class="QGroupBox" name="gbCRS">
-         <property name="title">
-          <string>Options</string>
-         </property>
-         <layout class="QGridLayout">
-          <item row="0" column="0">
-           <widget class="QLabel" name="label">
-            <property name="text">
-             <string>Layer name</string>
-            </property>
-            <property name="buddy">
-             <cstring>leLayerName</cstring>
-            </property>
-           </widget>
-          </item>
-          <item row="0" column="1" colspan="2">
-           <widget class="QLineEdit" name="leLayerName"/>
-          </item>
-          <item row="3" column="0" colspan="2">
-           <widget class="QLabel" name="labelCoordRefSys">
-            <property name="text">
-             <string>Coordinate Reference System</string>
-            </property>
-            <property name="buddy">
-             <cstring>btnChangeSpatialRefSys</cstring>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="2">
-           <widget class="QPushButton" name="btnChangeSpatialRefSys">
-            <property name="enabled">
-             <bool>false</bool>
-            </property>
-            <property name="text">
-             <string>Change ...</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="1">
-           <widget class="QLineEdit" name="mTileWidth"/>
-          </item>
-          <item row="1" column="0">
-           <widget class="QLabel" name="label_2">
-            <property name="text">
-             <string>Tile size</string>
-            </property>
-            <property name="buddy">
-             <cstring>mTileWidth</cstring>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="2">
-           <widget class="QLineEdit" name="mTileHeight"/>
-          </item>
-          <item row="2" column="0" colspan="2">
-           <widget class="QLabel" name="label_3">
-            <property name="text">
-             <string>Feature limit for GetFeatureInfo</string>
-            </property>
-            <property name="buddy">
-             <cstring>mFeatureCount</cstring>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="2">
-           <widget class="QLineEdit" name="mFeatureCount">
-            <property name="text">
-             <string>10</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
+       <item row="2" column="0">
+        <layout class="QHBoxLayout" name="horizontalLayout_3">
+         <item>
+          <spacer name="horizontalSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QgsFilterLineEdit" name="mLayersFilterLineEdit">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="showSearchIcon">
+            <bool>true</bool>
+           </property>
+           <property name="qgisRelation" stdset="0">
+            <string notr="true"/>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </item>
       </layout>
      </widget>
@@ -319,7 +382,7 @@
        <item row="1" column="0" colspan="3">
         <widget class="QTreeWidget" name="mLayerOrderTreeWidget">
          <property name="columnCount">
-          <number>2</number>
+          <number>3</number>
          </property>
          <column>
           <property name="text">
@@ -331,6 +394,11 @@
            <string>Style</string>
           </property>
          </column>
+         <column>
+          <property name="text">
+           <string>Title</string>
+          </property>
+         </column>
         </widget>
        </item>
       </layout>
@@ -340,7 +408,7 @@
        <string>Tilesets</string>
       </attribute>
       <layout class="QGridLayout" name="gridLayout_3">
-       <item row="0" column="0">
+       <item row="2" column="0">
         <widget class="QTableWidget" name="lstTilesets">
          <property name="alternatingRowColors">
           <bool>true</bool>
@@ -369,12 +437,12 @@
          </column>
          <column>
           <property name="text">
-           <string>Style</string>
+           <string>Title</string>
           </property>
          </column>
          <column>
           <property name="text">
-           <string>Title</string>
+           <string>Style</string>
           </property>
          </column>
          <column>
@@ -389,63 +457,38 @@
          </column>
         </widget>
        </item>
-      </layout>
-     </widget>
-     <widget class="QWidget" name="tabServerSearch">
-      <attribute name="title">
-       <string>Server Search</string>
-      </attribute>
-      <layout class="QGridLayout">
        <item row="0" column="0">
-        <widget class="QLineEdit" name="leSearchTerm"/>
-       </item>
-       <item row="0" column="1">
-        <widget class="QPushButton" name="btnSearch">
-         <property name="text">
-          <string>Search</string>
-         </property>
-         <property name="default">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item row="1" column="0" colspan="2">
-        <widget class="QTableWidget" name="tableWidgetWMSList">
-         <property name="selectionMode">
-          <enum>QAbstractItemView::SingleSelection</enum>
-         </property>
-         <property name="selectionBehavior">
-          <enum>QAbstractItemView::SelectRows</enum>
-         </property>
-         <property name="cornerButtonEnabled">
-          <bool>false</bool>
-         </property>
-         <attribute name="verticalHeaderVisible">
-          <bool>false</bool>
-         </attribute>
-         <column>
-          <property name="text">
-           <string>Title</string>
-          </property>
-         </column>
-         <column>
-          <property name="text">
-           <string>Description</string>
-          </property>
-         </column>
-         <column>
-          <property name="text">
-           <string>URL</string>
-          </property>
-         </column>
-        </widget>
-       </item>
-       <item row="2" column="0" colspan="2">
-        <widget class="QPushButton" name="btnAddWMS">
-         <property name="text">
-          <string>Add selected row to WMS list</string>
-         </property>
-        </widget>
+        <layout class="QHBoxLayout" name="horizontalLayout_4">
+         <item>
+          <spacer name="horizontalSpacer_3">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QgsFilterLineEdit" name="mTilesetsFilterLineEdit">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="showSearchIcon">
+            <bool>true</bool>
+           </property>
+           <property name="qgisRelation" stdset="0">
+            <string notr="true"/>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </item>
       </layout>
      </widget>
@@ -454,31 +497,29 @@
   </layout>
  </widget>
  <layoutdefault spacing="6" margin="11"/>
+ <customwidgets>
+  <customwidget>
+   <class>QgsFilterLineEdit</class>
+   <extends>QLineEdit</extends>
+   <header>qgsfilterlineedit.h</header>
+  </customwidget>
+ </customwidgets>
  <tabstops>
   <tabstop>tabServers</tabstop>
   <tabstop>cmbConnections</tabstop>
-  <tabstop>btnConnect</tabstop>
-  <tabstop>btnNew</tabstop>
-  <tabstop>btnEdit</tabstop>
-  <tabstop>btnDelete</tabstop>
-  <tabstop>btnLoad</tabstop>
-  <tabstop>btnSave</tabstop>
-  <tabstop>btnAddDefault</tabstop>
   <tabstop>lstLayers</tabstop>
-  <tabstop>leLayerName</tabstop>
   <tabstop>mTileWidth</tabstop>
   <tabstop>mTileHeight</tabstop>
+  <tabstop>mStepWidth</tabstop>
+  <tabstop>mStepHeight</tabstop>
   <tabstop>mFeatureCount</tabstop>
   <tabstop>btnChangeSpatialRefSys</tabstop>
-  <tabstop>mLayerUpButton</tabstop>
-  <tabstop>mLayerDownButton</tabstop>
-  <tabstop>mLayerOrderTreeWidget</tabstop>
+  <tabstop>mContextualLegendCheckbox</tabstop>
+  <tabstop>leLayerName</tabstop>
   <tabstop>lstTilesets</tabstop>
-  <tabstop>leSearchTerm</tabstop>
-  <tabstop>btnSearch</tabstop>
-  <tabstop>tableWidgetWMSList</tabstop>
-  <tabstop>btnAddWMS</tabstop>
-  <tabstop>buttonBox</tabstop>
+  <tabstop>mLayerOrderTreeWidget</tabstop>
+  <tabstop>mLayerDownButton</tabstop>
+  <tabstop>mLayerUpButton</tabstop>
  </tabstops>
  <resources/>
  <connections>

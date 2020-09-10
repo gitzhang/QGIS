@@ -17,154 +17,545 @@
 
 #include "qgsgeometry.h"
 #include "qgsfeature.h"
+#include "qgsfeatureiterator.h"
 #include "qgsrectangle.h"
 #include "qgslogger.h"
+#include "qgsfeaturesource.h"
+#include "qgsfeedback.h"
+#include "qgsspatialindexutils.h"
 
-#include "SpatialIndex.h"
+#include <spatialindex/SpatialIndex.h>
+#include <QMutex>
+#include <QMutexLocker>
 
 using namespace SpatialIndex;
 
 
-// custom visitor that adds found features to list
+
+/**
+ * \ingroup core
+ * \class QgisVisitor
+ * \brief Custom visitor that adds found features to list.
+ * \note not available in Python bindings
+ */
 class QgisVisitor : public SpatialIndex::IVisitor
 {
   public:
-    QgisVisitor( QList<QgsFeatureId> & list )
-        : mList( list ) {}
+    explicit QgisVisitor( QList<QgsFeatureId> &list )
+      : mList( list ) {}
 
-    void visitNode( const INode& n )
-    { Q_UNUSED( n ); }
+    void visitNode( const INode &n ) override
+    { Q_UNUSED( n ) }
 
-    void visitData( const IData& d )
+    void visitData( const IData &d ) override
     {
       mList.append( d.getIdentifier() );
     }
 
-    void visitData( std::vector<const IData*>& v )
-    { Q_UNUSED( v ); }
+    void visitData( std::vector<const IData *> &v ) override
+    { Q_UNUSED( v ) }
 
   private:
-    QList<QgsFeatureId>& mList;
+    QList<QgsFeatureId> &mList;
+};
+
+/**
+ * \ingroup core
+ * \class QgsSpatialIndexCopyVisitor
+ * \note not available in Python bindings
+ */
+class QgsSpatialIndexCopyVisitor : public SpatialIndex::IVisitor
+{
+  public:
+    explicit QgsSpatialIndexCopyVisitor( SpatialIndex::ISpatialIndex *newIndex )
+      : mNewIndex( newIndex ) {}
+
+    void visitNode( const INode &n ) override
+    { Q_UNUSED( n ) }
+
+    void visitData( const IData &d ) override
+    {
+      SpatialIndex::IShape *shape = nullptr;
+      d.getShape( &shape );
+      mNewIndex->insertData( 0, nullptr, *shape, d.getIdentifier() );
+      delete shape;
+    }
+
+    void visitData( std::vector<const IData *> &v ) override
+    { Q_UNUSED( v ) }
+
+  private:
+    SpatialIndex::ISpatialIndex *mNewIndex = nullptr;
+};
+
+///@cond PRIVATE
+class QgsNearestNeighborComparator : public INearestNeighborComparator
+{
+  public:
+
+    QgsNearestNeighborComparator( const QHash< QgsFeatureId, QgsGeometry > *geometries, const QgsPointXY &point, double maxDistance )
+      : mGeometries( geometries )
+      , mGeom( QgsGeometry::fromPointXY( point ) )
+      , mMaxDistance( maxDistance )
+    {
+    }
+
+    QgsNearestNeighborComparator( const QHash< QgsFeatureId, QgsGeometry > *geometries, const QgsGeometry &geometry, double maxDistance )
+      : mGeometries( geometries )
+      , mGeom( geometry )
+      , mMaxDistance( maxDistance )
+    {
+    }
+
+    const QHash< QgsFeatureId, QgsGeometry > *mGeometries = nullptr;
+    QgsGeometry mGeom;
+    double mMaxDistance = 0;
+    QSet< QgsFeatureId > mFeaturesOutsideMaxDistance;
+
+    double getMinimumDistance( const IShape &query, const IShape &entry ) override
+    {
+      return query.getMinimumDistance( entry );
+    }
+
+    double getMinimumDistance( const IShape &query, const IData &data ) override
+    {
+      // start with the default implementation, which gives distance to bounding box only
+      IShape *pS;
+      data.getShape( &pS );
+      double dist = query.getMinimumDistance( *pS );
+      delete pS;
+
+      // if doing exact distance search, AND either no max distance specified OR the
+      // distance to the bounding box is less than the max distance, calculate the exact
+      // distance now.
+      // (note: if bounding box is already greater than the distance away then max distance, there's no
+      // point doing this more expensive calculation, since we can't possibly use this feature anyway!)
+      if ( mGeometries && ( mMaxDistance <= 0.0 || dist <= mMaxDistance ) )
+      {
+        QgsGeometry other = mGeometries->value( data.getIdentifier() );
+        dist = other.distance( mGeom );
+      }
+
+      if ( mMaxDistance > 0 && dist > mMaxDistance )
+      {
+        // feature is outside of maximum distance threshold. Flag it,
+        // but "trick" libspatialindex into considering it as just outside
+        // our max distance region. This means if there's no other closer features (i.e.,
+        // within our actual maximum search distance), the libspatialindex
+        // nearest neighbor test will use this feature and not needlessly continue hunting
+        // through the remaining more distant features in the index.
+        // TODO: add proper API to libspatialindex to allow a maximum search distance in
+        // nearest neighbor tests
+        mFeaturesOutsideMaxDistance.insert( data.getIdentifier() );
+        return mMaxDistance + 0.00000001;
+      }
+      return dist;
+    }
+};
+
+/**
+ * \ingroup core
+ * \class QgsFeatureIteratorDataStream
+ * \brief Utility class for bulk loading of R-trees. Not a part of public API.
+ * \note not available in Python bindings
+*/
+class QgsFeatureIteratorDataStream : public IDataStream
+{
+  public:
+    //! constructor - needs to load all data to a vector for later access when bulk loading
+    explicit QgsFeatureIteratorDataStream( const QgsFeatureIterator &fi, QgsFeedback *feedback = nullptr, QgsSpatialIndex::Flags flags = QgsSpatialIndex::Flags(),
+                                           const std::function< bool( const QgsFeature & ) > *callback = nullptr )
+      : mFi( fi )
+      , mFeedback( feedback )
+      , mFlags( flags )
+      , mCallback( callback )
+    {
+      readNextEntry();
+    }
+
+    ~QgsFeatureIteratorDataStream() override
+    {
+      delete mNextData;
+    }
+
+    //! returns a pointer to the next entry in the stream or 0 at the end of the stream.
+    IData *getNext() override
+    {
+      if ( mFeedback && mFeedback->isCanceled() )
+        return nullptr;
+
+      RTree::Data *ret = mNextData;
+      mNextData = nullptr;
+      readNextEntry();
+      return ret;
+    }
+
+    //! returns true if there are more items in the stream.
+    bool hasNext() override { return nullptr != mNextData; }
+
+    //! returns the total number of entries available in the stream.
+    uint32_t size() override { Q_ASSERT( false && "not available" ); return 0; }
+
+    //! sets the stream pointer to the first entry, if possible.
+    void rewind() override { Q_ASSERT( false && "not available" ); }
+
+    QHash< QgsFeatureId, QgsGeometry > geometries;
+
+  protected:
+    void readNextEntry()
+    {
+      QgsFeature f;
+      SpatialIndex::Region r;
+      QgsFeatureId id;
+      while ( mFi.nextFeature( f ) )
+      {
+        if ( mCallback )
+        {
+          bool res = ( *mCallback )( f );
+          if ( !res )
+          {
+            mNextData = nullptr;
+            return;
+          }
+        }
+        if ( QgsSpatialIndex::featureInfo( f, r, id ) )
+        {
+          mNextData = new RTree::Data( 0, nullptr, r, id );
+          if ( mFlags & QgsSpatialIndex::FlagStoreFeatureGeometries )
+            geometries.insert( f.id(), f.geometry() );
+          return;
+        }
+      }
+    }
+
+  private:
+    QgsFeatureIterator mFi;
+    RTree::Data *mNextData = nullptr;
+    QgsFeedback *mFeedback = nullptr;
+    QgsSpatialIndex::Flags mFlags = nullptr;
+    const std::function< bool( const QgsFeature & ) > *mCallback = nullptr;
+
 };
 
 
-QgsSpatialIndex::QgsSpatialIndex()
+/**
+ * \ingroup core
+ * \class QgsSpatialIndexData
+ * \brief Data of spatial index that may be implicitly shared
+ * \note not available in Python bindings
+*/
+class QgsSpatialIndexData : public QSharedData
 {
-  // for now only memory manager
-  mStorageManager = StorageManager::createNewMemoryStorageManager();
+  public:
+    QgsSpatialIndexData( QgsSpatialIndex::Flags flags )
+      : mFlags( flags )
+    {
+      initTree();
+    }
 
-  // create buffer
+    QgsSpatialIndex::Flags mFlags = nullptr;
 
-  unsigned int capacity = 10;
-  bool writeThrough = false;
-  mStorage = StorageManager::createNewRandomEvictionsBuffer( *mStorageManager, capacity, writeThrough );
+    QHash< QgsFeatureId, QgsGeometry > mGeometries;
 
-  // R-Tree parameters
-  double fillFactor = 0.7;
-  unsigned long indexCapacity = 10;
-  unsigned long leafCapacity = 10;
-  unsigned long dimension = 2;
-  RTree::RTreeVariant variant = RTree::RV_RSTAR;
+    /**
+     * Constructor for QgsSpatialIndexData which bulk loads features from the specified feature iterator
+     * \a fi.
+     *
+     * The optional \a feedback object can be used to allow cancellation of bulk feature loading. Ownership
+     * of \a feedback is not transferred, and callers must take care that the lifetime of feedback exceeds
+     * that of the spatial index construction.
+     */
+    explicit QgsSpatialIndexData( const QgsFeatureIterator &fi, QgsFeedback *feedback = nullptr, QgsSpatialIndex::Flags flags = QgsSpatialIndex::Flags(),
+                                  const std::function< bool( const QgsFeature & ) > *callback = nullptr )
+      : mFlags( flags )
+    {
+      QgsFeatureIteratorDataStream fids( fi, feedback, mFlags, callback );
+      initTree( &fids );
+      if ( flags & QgsSpatialIndex::FlagStoreFeatureGeometries )
+        mGeometries = fids.geometries;
+    }
 
-  // create R-tree
-  SpatialIndex::id_type indexId;
-  mRTree = RTree::createNewRTree( *mStorage, fillFactor, indexCapacity,
-                                  leafCapacity, dimension, variant, indexId );
+    QgsSpatialIndexData( const QgsSpatialIndexData &other )
+      : QSharedData( other )
+      , mFlags( other.mFlags )
+      , mGeometries( other.mGeometries )
+    {
+      QMutexLocker locker( &other.mMutex );
+
+      initTree();
+
+      // copy R-tree data one by one (is there a faster way??)
+      double low[]  = { std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest() };
+      double high[] = { std::numeric_limits<double>::max(), std::numeric_limits<double>::max() };
+      SpatialIndex::Region query( low, high, 2 );
+      QgsSpatialIndexCopyVisitor visitor( mRTree );
+      other.mRTree->intersectsWithQuery( query, visitor );
+    }
+
+    ~QgsSpatialIndexData()
+    {
+      delete mRTree;
+      delete mStorage;
+    }
+
+    QgsSpatialIndexData &operator=( const QgsSpatialIndexData &rh ) = delete;
+
+    void initTree( IDataStream *inputStream = nullptr )
+    {
+      // for now only memory manager
+      mStorage = StorageManager::createNewMemoryStorageManager();
+
+      // R-Tree parameters
+      double fillFactor = 0.7;
+      unsigned long indexCapacity = 10;
+      unsigned long leafCapacity = 10;
+      unsigned long dimension = 2;
+      RTree::RTreeVariant variant = RTree::RV_RSTAR;
+
+      // create R-tree
+      SpatialIndex::id_type indexId;
+
+      if ( inputStream && inputStream->hasNext() )
+        mRTree = RTree::createAndBulkLoadNewRTree( RTree::BLM_STR, *inputStream, *mStorage, fillFactor, indexCapacity,
+                 leafCapacity, dimension, variant, indexId );
+      else
+        mRTree = RTree::createNewRTree( *mStorage, fillFactor, indexCapacity,
+                                        leafCapacity, dimension, variant, indexId );
+    }
+
+    //! Storage manager
+    SpatialIndex::IStorageManager *mStorage = nullptr;
+
+    //! R-tree containing spatial index
+    SpatialIndex::ISpatialIndex *mRTree = nullptr;
+
+    mutable QMutex mMutex;
+
+};
+
+///@endcond
+
+// -------------------------------------------------------------------------
+
+
+QgsSpatialIndex::QgsSpatialIndex( QgsSpatialIndex::Flags flags )
+{
+  d = new QgsSpatialIndexData( flags );
 }
 
-QgsSpatialIndex:: ~QgsSpatialIndex()
+QgsSpatialIndex::QgsSpatialIndex( const QgsFeatureIterator &fi, QgsFeedback *feedback, QgsSpatialIndex::Flags flags )
 {
-  delete mRTree;
-  delete mStorage;
-  delete mStorageManager;
+  d = new QgsSpatialIndexData( fi, feedback, flags );
 }
 
-Region QgsSpatialIndex::rectToRegion( QgsRectangle rect )
+///@cond PRIVATE // else throws a doxygen warning?
+QgsSpatialIndex::QgsSpatialIndex( const QgsFeatureIterator &fi, const std::function< bool( const QgsFeature & )> &callback, QgsSpatialIndex::Flags flags )
 {
-  double pt1[2], pt2[2];
-  pt1[0] = rect.xMinimum();
-  pt1[1] = rect.yMinimum();
-  pt2[0] = rect.xMaximum();
-  pt2[1] = rect.yMaximum();
-  return Region( pt1, pt2, 2 );
+  d = new QgsSpatialIndexData( fi, nullptr, flags, &callback );
+}
+///@endcond
+
+QgsSpatialIndex::QgsSpatialIndex( const QgsFeatureSource &source, QgsFeedback *feedback, QgsSpatialIndex::Flags flags )
+{
+  d = new QgsSpatialIndexData( source.getFeatures( QgsFeatureRequest().setNoAttributes() ), feedback, flags );
 }
 
-bool QgsSpatialIndex::featureInfo( QgsFeature& f, SpatialIndex::Region& r, QgsFeatureId &id )
+QgsSpatialIndex::QgsSpatialIndex( const QgsSpatialIndex &other ) //NOLINT
+  : d( other.d )
 {
-  QgsGeometry *g = f.geometry();
-  if ( !g )
+}
+
+QgsSpatialIndex:: ~QgsSpatialIndex() //NOLINT
+{
+}
+
+QgsSpatialIndex &QgsSpatialIndex::operator=( const QgsSpatialIndex &other )
+{
+  if ( this != &other )
+    d = other.d;
+  return *this;
+}
+
+bool QgsSpatialIndex::featureInfo( const QgsFeature &f, SpatialIndex::Region &r, QgsFeatureId &id )
+{
+  QgsRectangle rect;
+  if ( !featureInfo( f, rect, id ) )
     return false;
 
-  id = f.id();
-  r = rectToRegion( g->boundingBox() );
+  r = QgsSpatialIndexUtils::rectangleToRegion( rect );
   return true;
 }
 
-bool QgsSpatialIndex::insertFeature( QgsFeature& f )
+bool QgsSpatialIndex::featureInfo( const QgsFeature &f, QgsRectangle &rect, QgsFeatureId &id )
 {
-  Region r;
-  QgsFeatureId id;
-  if ( !featureInfo( f, r, id ) )
+  if ( !f.hasGeometry() )
     return false;
+
+  id = f.id();
+  rect = f.geometry().boundingBox();
+
+  if ( !rect.isFinite() )
+    return false;
+
+  return true;
+}
+
+bool QgsSpatialIndex::addFeature( QgsFeature &feature, QgsFeatureSink::Flags )
+{
+  QgsRectangle rect;
+  QgsFeatureId id;
+  if ( !featureInfo( feature, rect, id ) )
+    return false;
+
+  if ( addFeature( id, rect ) )
+  {
+    if ( d->mFlags & QgsSpatialIndex::FlagStoreFeatureGeometries )
+    {
+      QMutexLocker locker( &d->mMutex );
+      d->mGeometries.insert( feature.id(), feature.geometry() );
+    }
+    return true;
+  }
+  return false;
+}
+
+bool QgsSpatialIndex::addFeatures( QgsFeatureList &features, QgsFeatureSink::Flags flags )
+{
+  QgsFeatureList::iterator fIt = features.begin();
+  bool result = true;
+  for ( ; fIt != features.end(); ++fIt )
+  {
+    result = result && addFeature( *fIt, flags );
+  }
+  return result;
+}
+
+bool QgsSpatialIndex::insertFeature( const QgsFeature &f )
+{
+  QgsFeature feature( f );
+  return addFeature( feature );
+}
+
+bool QgsSpatialIndex::insertFeature( QgsFeatureId id, const QgsRectangle &bounds )
+{
+  return addFeature( id, bounds );
+}
+
+bool QgsSpatialIndex::addFeature( QgsFeatureId id, const QgsRectangle &bounds )
+{
+  SpatialIndex::Region r( QgsSpatialIndexUtils::rectangleToRegion( bounds ) );
+
+  QMutexLocker locker( &d->mMutex );
 
   // TODO: handle possible exceptions correctly
   try
   {
-    mRTree->insertData( 0, 0, r, FID_TO_NUMBER( id ) );
+    d->mRTree->insertData( 0, nullptr, r, FID_TO_NUMBER( id ) );
     return true;
   }
   catch ( Tools::Exception &e )
   {
-    Q_UNUSED( e );
-    QgsDebugMsg( QString( "Tools::Exception caught: " ).arg( e.what().c_str() ) );
+    Q_UNUSED( e )
+    QgsDebugMsg( QStringLiteral( "Tools::Exception caught: " ).arg( e.what().c_str() ) );
   }
   catch ( const std::exception &e )
   {
-    Q_UNUSED( e );
-    QgsDebugMsg( QString( "std::exception caught: " ).arg( e.what() ) );
+    Q_UNUSED( e )
+    QgsDebugMsg( QStringLiteral( "std::exception caught: " ).arg( e.what() ) );
   }
   catch ( ... )
   {
-    QgsDebugMsg( "unknown spatial index exception caught" );
+    QgsDebugMsg( QStringLiteral( "unknown spatial index exception caught" ) );
   }
 
   return false;
 }
 
-bool QgsSpatialIndex::deleteFeature( QgsFeature& f )
+bool QgsSpatialIndex::deleteFeature( const QgsFeature &f )
 {
-  Region r;
+  SpatialIndex::Region r;
   QgsFeatureId id;
   if ( !featureInfo( f, r, id ) )
     return false;
 
+  QMutexLocker locker( &d->mMutex );
   // TODO: handle exceptions
-  return mRTree->deleteData( r, FID_TO_NUMBER( id ) );
+  if ( d->mFlags & QgsSpatialIndex::FlagStoreFeatureGeometries )
+    d->mGeometries.remove( f.id() );
+  return d->mRTree->deleteData( r, FID_TO_NUMBER( id ) );
 }
 
-QList<QgsFeatureId> QgsSpatialIndex::intersects( QgsRectangle rect )
+QList<QgsFeatureId> QgsSpatialIndex::intersects( const QgsRectangle &rect ) const
 {
   QList<QgsFeatureId> list;
   QgisVisitor visitor( list );
 
-  Region r = rectToRegion( rect );
+  SpatialIndex::Region r = QgsSpatialIndexUtils::rectangleToRegion( rect );
 
-  mRTree->intersectsWithQuery( r, visitor );
+  QMutexLocker locker( &d->mMutex );
+  d->mRTree->intersectsWithQuery( r, visitor );
 
   return list;
 }
 
-QList<QgsFeatureId> QgsSpatialIndex::nearestNeighbor( QgsPoint point, int neighbors )
+QList<QgsFeatureId> QgsSpatialIndex::nearestNeighbor( const QgsPointXY &point, const int neighbors, const double maxDistance ) const
 {
   QList<QgsFeatureId> list;
   QgisVisitor visitor( list );
 
-  double pt[2];
-  pt[0] = point.x();
-  pt[1] = point.y();
+  double pt[2] = { point.x(), point.y() };
   Point p( pt, 2 );
 
-  mRTree->nearestNeighborQuery( neighbors, p, visitor );
+  QMutexLocker locker( &d->mMutex );
+  QgsNearestNeighborComparator nnc( ( d->mFlags & QgsSpatialIndex::FlagStoreFeatureGeometries ) ? &d->mGeometries : nullptr,
+                                    point, maxDistance );
+  d->mRTree->nearestNeighborQuery( neighbors, p, visitor, nnc );
+
+  if ( maxDistance > 0 )
+  {
+    // trim features outside of max distance
+    list.erase( std::remove_if( list.begin(), list.end(),
+                                [&nnc]( QgsFeatureId id )
+    {
+      return nnc.mFeaturesOutsideMaxDistance.contains( id );
+    } ), list.end() );
+  }
 
   return list;
+}
+
+QList<QgsFeatureId> QgsSpatialIndex::nearestNeighbor( const QgsGeometry &geometry, int neighbors, double maxDistance ) const
+{
+  QList<QgsFeatureId> list;
+  QgisVisitor visitor( list );
+
+  SpatialIndex::Region r = QgsSpatialIndexUtils::rectangleToRegion( geometry.boundingBox() );
+
+  QMutexLocker locker( &d->mMutex );
+  QgsNearestNeighborComparator nnc( ( d->mFlags & QgsSpatialIndex::FlagStoreFeatureGeometries ) ? &d->mGeometries : nullptr,
+                                    geometry, maxDistance );
+  d->mRTree->nearestNeighborQuery( neighbors, r, visitor, nnc );
+
+  if ( maxDistance > 0 )
+  {
+    // trim features outside of max distance
+    list.erase( std::remove_if( list.begin(), list.end(),
+                                [&nnc]( QgsFeatureId id )
+    {
+      return nnc.mFeaturesOutsideMaxDistance.contains( id );
+    } ), list.end() );
+  }
+
+  return list;
+}
+
+QgsGeometry QgsSpatialIndex::geometry( QgsFeatureId id ) const
+{
+  QMutexLocker locker( &d->mMutex );
+  return d->mGeometries.value( id );
+}
+
+QAtomicInt QgsSpatialIndex::refs() const
+{
+  return d->ref;
 }

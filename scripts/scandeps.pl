@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 ###########################################################################
 #    scandeps.pl
 #    ---------------------
@@ -17,19 +17,37 @@
 use strict;
 use warnings;
 
-open I, "doc/linux.t2t";
-open O, ">doc/linux.t2t.new";
+my @dists;
+open I, "debian/rules";
 while(<I>) {
-	last if /^\|\| Distribution \| install command for packages \|\n$/;
+	if( /ifneq \(\$\(DISTRIBUTION\),\$\(findstring \$\(DISTRIBUTION\),"(.*)"\)\)/ ) {
+		for my $d (split / /, $1) {
+			next if $d =~ /oracle/;
+			push @dists, $d;
+		}
+		push @dists, "sid";
+		last;
+	}
+}
+close I;
+
+die "no dists" unless @dists;
+
+open I, "doc/INSTALL.md";
+open O, ">doc/INSTALL.md.new";
+while(<I>) {
+	last if /^\|Distribution\|Install command for packages\|\n$/;
 	print O;
 }
 
-print O "|| Distribution | install command for packages |\n";
+print O "|Distribution|Install command for packages|\n";
+print O "|------------|----------------------------|\n";
 
-for my $c (<debian/control.*>) {
-	my ($dist) = $c =~ /^.*\/control\.(.*)$/;
+for my $dist (@dists) {
+	system("git checkout debian/control" )==0 or die "git checkout failed: $!";
+	system("make -f debian/rules DISTRIBUTION=$dist cleantemplates templates" )==0 or die "make failed: $!";
 
-	open F, $c;
+	open F, "debian/control";
 	while(<F>) {
 		chop;
 		last if /^Build-Depends:/i;
@@ -44,12 +62,41 @@ for my $c (<debian/control.*>) {
 		$deps .= $_;
 	}
 
+	while(<F>) {
+		chop;
+		last if /^Package: python3-qgis/;
+	}
+
+	while(<F>) {
+		chop;
+		last if /^Depends:/;
+	}
+
+	s/^Depends:\s*//;
+	$deps .= ",$_";
+
+	while(<F>) {
+		chop;
+		last if /^\S/;
+		$deps .= $_;
+	}
+
+	close F;
+
+	system("git checkout debian/control" )==0 or die "git checkout failed: $!";
+
+	$deps .= ",cmake-curses-gui,ccache,expect,qt5-default,libyaml-tiny-perl,flip,python3-autopep8";
+
 	my @deps;
+	my %deps;
 	foreach my $p (split /,/, $deps) {
 		$p =~ s/^\s+//;
 		$p =~ s/\s+.*$//;
+		next if $p eq "";
+		next if $p =~ /\$|qgis/;
 		next if $p =~ /^(debhelper|subversion|python-central)$/;
-		push @deps, $p;
+		push @deps, $p if not exists $deps{$p};
+		$deps{$p} = 1;
 	}
 
 	my $dep="";
@@ -63,7 +110,7 @@ for my $c (<debian/control.*>) {
 		}
 	}
 
-	push @dep, $dep;
+	push @dep, $dep if $dep ne "";
 
 	print O "| $dist | ``apt-get install" . join( " ", @dep ) . "`` |\n";
 }
@@ -81,5 +128,5 @@ while(<I>) {
 close O;
 close I;
 
-rename "doc/linux.t2t", "doc/linux.t2t.orig";
-rename "doc/linux.t2t.new", "doc/linux.t2t";
+rename "doc/INSTALL.md", "doc/INSTALL.md.orig";
+rename "doc/INSTALL.md.new", "doc/INSTALL.md";

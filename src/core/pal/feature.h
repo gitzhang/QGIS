@@ -27,36 +27,37 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
+#ifndef FEATURE_H
+#define FEATURE_H
 
-#ifndef _FEATURE_H
-#define _FEATURE_H
+#define SIP_NO_FILE
 
+
+#include "qgis_core.h"
+#include "pointset.h"
+#include "labelposition.h" // for LabelPosition enum
+#include "qgslabelfeature.h"
 #include <iostream>
 #include <fstream>
 #include <cmath>
+#include <QString>
 
-#include <geos_c.h>
-
-#include <pal/palgeometry.h>
-
-#include "pointset.h"
-#include "util.h"
-
+/**
+ * \ingroup core
+ * \class pal::LabelInfo
+ * \note not available in Python bindings
+ */
 
 namespace pal
 {
-  /** optional additional info about label (for curved labels) */
+  //! Optional additional info about label (for curved labels)
   class CORE_EXPORT LabelInfo
   {
     public:
-      typedef struct
+      struct CharacterInfo
       {
-        unsigned short chr;
         double width;
-      } CharacterInfo;
+      };
 
       LabelInfo( int num, double height, double maxinangle = 20.0, double maxoutangle = -20.0 )
       {
@@ -69,236 +70,325 @@ namespace pal
       }
       ~LabelInfo() { delete [] char_info; }
 
+      //! LabelInfo cannot be copied
+      LabelInfo( const LabelInfo &rh ) = delete;
+      //! LabelInfo cannot be copied
+      LabelInfo &operator=( const LabelInfo &rh ) = delete;
+
       double max_char_angle_inside;
       double max_char_angle_outside;
       double label_height;
       int char_num;
-      CharacterInfo* char_info;
+      CharacterInfo *char_info = nullptr;
+
   };
 
   class LabelPosition;
   class FeaturePart;
 
-  class CORE_EXPORT Feature
-  {
-      friend class FeaturePart;
-
-    public:
-      Feature( Layer* l, const char* id, PalGeometry* userG, double lx, double ly );
-      ~Feature();
-
-      void setLabelInfo( LabelInfo* info ) { labelInfo = info; }
-      void setDistLabel( double dist ) { distlabel = dist; }
-      //Set label position of the feature to fixed x/y values
-      void setFixedPosition( double x, double y ) { fixedPos = true; fixedPosX = x; fixedPosY = y;}
-      void setQuadOffset( double x, double y ) { quadOffset = true; quadOffsetX = x; quadOffsetY = y;}
-      void setPosOffset( double x, double y ) { offsetPos = true; offsetPosX = x; offsetPosY = y;}
-      bool fixedPosition() const { return fixedPos; }
-      //Set label rotation to fixed value
-      void setFixedAngle( double a ) { fixedRotation = true; fixedAngle = a; }
-      void setAlwaysShow( bool bl ) { alwaysShow = bl; }
-
-    protected:
-      Layer *layer;
-      PalGeometry *userGeom;
-      double label_x;
-      double label_y;
-      double distlabel;
-      LabelInfo* labelInfo; // optional
-
-      char *uid;
-
-      bool fixedPos; //true in case of fixed position (only 1 candidate position with cost 0)
-      double fixedPosX;
-      double fixedPosY;
-      bool quadOffset; // true if a quadrant offset exists
-      double quadOffsetX;
-      double quadOffsetY;
-      bool offsetPos; //true if position is to be offset by set amount
-      double offsetPosX;
-      double offsetPosY;
-      //Fixed (e.g. data defined) angle only makes sense together with fixed position
-      bool fixedRotation;
-      double fixedAngle; //fixed angle value (in rad)
-
-      bool alwaysShow; //true is label is to always be shown (but causes overlapping)
-
-      // array of parts - possibly not necessary
-      //int nPart;
-      //FeaturePart** parts;
-  };
-
   /**
+   * \ingroup core
    * \brief Main class to handle feature
+   * \class pal::FeaturePart
+   * \note not available in Python bindings
    */
   class CORE_EXPORT FeaturePart : public PointSet
   {
 
-    protected:
-      Feature* f;
-
-      int nbHoles;
-      PointSet **holes;
-
-      GEOSGeometry *the_geom;
-      bool ownsGeom;
-
-      /** \brief read coordinates from a GEOS geom */
-      void extractCoords( const GEOSGeometry* geom );
-
-      /** find duplicate (or nearly duplicate points) and remove them.
-       * Probably to avoid numerical errors in geometry algorithms.
-       */
-      void removeDuplicatePoints();
-
     public:
 
       /**
-        * \brief create a new generic feature
-        *
-        * \param feat a pointer for a Feat which contains the spatial entites
+       * Creates a new generic feature.
+        * \param lf a pointer for a feature which contains the spatial entites
+        * \param geom a pointer to a GEOS geometry
         */
-      FeaturePart( Feature *feat, const GEOSGeometry* geom );
+      FeaturePart( QgsLabelFeature *lf, const GEOSGeometry *geom );
+
+      FeaturePart( const FeaturePart &other );
 
       /**
-       * \brief Delete the feature
+       * Delete the feature
        */
-      virtual ~FeaturePart();
+      ~FeaturePart() override;
 
       /**
-       * \brief generate candidates for point feature
-       * Generate candidates for point features
-       * \param x x coordinates of the point
-       * \param y y coordinates of the point
-       * \param scale map scale is 1:scale
+       * Returns the parent feature.
+       */
+      QgsLabelFeature *feature() { return mLF; }
+
+      /**
+       * Returns the layer that feature belongs to.
+       */
+      Layer *layer();
+
+      /**
+       * Returns the unique ID of the feature.
+       */
+      QgsFeatureId featureId() const;
+
+      /**
+       * Returns the maximum number of point candidates to generate for this feature.
+       */
+      std::size_t maximumPointCandidates() const;
+
+      /**
+       * Returns the maximum number of line candidates to generate for this feature.
+       */
+      std::size_t maximumLineCandidates() const;
+
+      /**
+       * Returns the maximum number of polygon candidates to generate for this feature.
+       */
+      std::size_t maximumPolygonCandidates() const;
+
+      /**
+       * Generates a list of candidate positions for labels for this feature.
+       */
+      std::vector<std::unique_ptr<LabelPosition> > createCandidates( Pal *pal );
+
+      /**
+       * Generate candidates for point feature, located around a specified point.
+       * \param x x coordinate of the point
+       * \param y y coordinate of the point
        * \param lPos pointer to an array of candidates, will be filled by generated candidates
        * \param angle orientation of the label
-       * \return the number of generated cadidates
+       * \returns the number of generated candidates
        */
-      int setPositionForPoint( double x, double y, double scale, LabelPosition ***lPos, double delta_width, double angle );
+      std::size_t createCandidatesAroundPoint( double x, double y, std::vector<std::unique_ptr<LabelPosition> > &lPos, double angle );
 
       /**
-       * generate one candidate over specified point
+       * Generate one candidate over or offset the specified point.
+       * \param x x coordinate of the point
+       * \param y y coordinate of the point
+       * \param lPos pointer to an array of candidates, will be filled by generated candidate
+       * \param angle orientation of the label
+       * \returns the number of generated candidates (always 1)
        */
-      int setPositionOverPoint( double x, double y, double scale, LabelPosition ***lPos, double delta_width, double angle );
+      std::size_t createCandidatesOverPoint( double x, double y, std::vector<std::unique_ptr<LabelPosition> > &lPos, double angle );
 
       /**
-       * \brief generate candidates for line feature
-       * Generate candidates for line features
-       * \param scale map scale is 1:scale
+       * Generate one candidate centered over the specified point.
+       * \param x x coordinate of the point
+       * \param y y coordinate of the point
+       * \param lPos pointer to an array of candidates, will be filled by generated candidate
+       * \param angle orientation of the label
+       * \returns the number of generated candidates (always 1)
+       */
+      std::size_t createCandidateCenteredOverPoint( double x, double y, std::vector<std::unique_ptr<LabelPosition> > &lPos, double angle );
+
+      /**
+       * Creates a single candidate using the "point on sruface" algorithm.
+       *
+       * \note Unlike the other create candidates methods, this method
+       * bypasses the usual candidate filtering steps and ALWAYS returns a single candidate.
+       */
+      std::unique_ptr< LabelPosition > createCandidatePointOnSurface( PointSet *mapShape );
+
+      /**
+       * Generates candidates following a prioritized list of predefined positions around a point.
+       * \param x x coordinate of the point
+       * \param y y coordinate of the point
+       * \param lPos pointer to an array of candidates, will be filled by generated candidate
+       * \param angle orientation of the label
+       * \returns the number of generated candidates
+       */
+      std::size_t createCandidatesAtOrderedPositionsOverPoint( double x, double y, std::vector<std::unique_ptr<LabelPosition> > &lPos, double angle );
+
+      /**
+       * Generate candidates for line feature.
        * \param lPos pointer to an array of candidates, will be filled by generated candidates
        * \param mapShape a pointer to the line
-       * \return the number of generated cadidates
+       * \param allowOverrun set to TRUE to allow labels to overrun features
+       * \param pal point to pal settings object, for cancellation support
+       * \returns the number of generated candidates
        */
-      int setPositionForLine( double scale, LabelPosition ***lPos, PointSet *mapShape, double delta_width );
-
-      LabelPosition* curvedPlacementAtOffset( PointSet* path_positions, double* path_distances,
-                                              int orientation, int index, double distance );
+      std::size_t createCandidatesAlongLine( std::vector<std::unique_ptr<LabelPosition> > &lPos, PointSet *mapShape, bool allowOverrun, Pal *pal );
 
       /**
-       * Generate curved candidates for line features
+       * Generate horizontal candidates for line feature.
+       * \param lPos pointer to an array of candidates, will be filled by generated candidates
+       * \param mapShape a pointer to the line
+       * \param pal point to pal settings object, for cancellation support
+       * \returns the number of generated candidates
        */
-      int setPositionForLineCurved( LabelPosition ***lPos, PointSet* mapShape );
+      std::size_t createHorizontalCandidatesAlongLine( std::vector<std::unique_ptr<LabelPosition> > &lPos, PointSet *mapShape, Pal *pal );
 
       /**
-       * \brief generate candidates for point feature
-       * Generate candidates for point features
-       * \param scale map scale is 1:scale
+       * Generate candidates for line feature, by trying to place candidates towards the middle of the longest
+       * straightish segments of the line. Segments closer to horizontal are preferred over vertical segments.
+       * \param lPos pointer to an array of candidates, will be filled by generated candidates
+       * \param mapShape a pointer to the line
+       * \param pal point to pal settings object, for cancellation support
+       * \returns the number of generated candidates
+       */
+      std::size_t createCandidatesAlongLineNearStraightSegments( std::vector<std::unique_ptr<LabelPosition> > &lPos, PointSet *mapShape, Pal *pal );
+
+      /**
+       * Generate candidates for line feature, by trying to place candidates as close as possible to the line's midpoint.
+       * Candidates can "cut corners" if it helps them place near this mid point.
+       * \param lPos pointer to an array of candidates, will be filled by generated candidates
+       * \param mapShape a pointer to the line
+       * \param initialCost initial cost for candidates generated using this method. If set, cost can be increased
+       * by a preset amount.
+       * \param pal point to pal settings object, for cancellation support
+       * \returns the number of generated candidates
+       */
+      std::size_t createCandidatesAlongLineNearMidpoint( std::vector<std::unique_ptr<LabelPosition> > &lPos, PointSet *mapShape, double initialCost = 0.0, Pal *pal = nullptr );
+
+      /**
+       * Returns the label position for a curved label at a specific offset along a path.
+       * \param path_positions line path to place label on
+       * \param path_distances array of distances to each segment on path
+       * \param orientation can be 0 for automatic calculation of orientation, or -1/+1 for a specific label orientation
+       * \param distance distance to offset label along curve by
+       * \param reversed if TRUE label is reversed from lefttoright to righttoleft
+       * \param flip if TRUE label is placed on the other side of the line
+       * \param applyAngleConstraints TRUE if label feature character angle constraints should be applied
+       * \returns calculated label position
+       */
+      std::unique_ptr< LabelPosition > curvedPlacementAtOffset( PointSet *path_positions, double *path_distances,
+          int &orientation, double distance, bool &reversed, bool &flip, bool applyAngleConstraints );
+
+      /**
+       * Generate curved candidates for line features.
+       * \param lPos pointer to an array of candidates, will be filled by generated candidates
+       * \param mapShape a pointer to the line
+       * \param allowOverrun set to TRUE to allow labels to overrun features
+       * \param pal point to pal settings object, for cancellation support
+       * \returns the number of generated candidates
+       */
+      std::size_t createCurvedCandidatesAlongLine( std::vector<std::unique_ptr<LabelPosition> > &lPos, PointSet *mapShape, bool allowOverrun, Pal *pal );
+
+      /**
+       * Generate candidates for polygon features.
        * \param lPos pointer to an array of candidates, will be filled by generated candidates
        * \param mapShape a pointer to the polygon
-       * \return the number of generated cadidates
+       * \param pal point to pal settings object, for cancellation support
+       * \returns the number of generated candidates
        */
-      int setPositionForPolygon( double scale, LabelPosition ***lPos, PointSet *mapShape, double delta_width );
-
+      std::size_t createCandidatesForPolygon( std::vector<std::unique_ptr<LabelPosition> > &lPos, PointSet *mapShape, Pal *pal );
 
       /**
-       * \brief Feature against problem bbox
-       * \param bbox[0] problem x min
-       * \param bbox[1] problem x max
-       * \param bbox[2] problem y min
-       * \param bbox[3] problem y max
-       * return A set of feature which are in the bbox or null if the feature is in the bbox
+       * Generate candidates outside of polygon features.
+       * \param lPos pointer to an array of candidates, will be filled by generated candidates
+       * \param pal point to pal settings object, for cancellation support
+       * \returns the number of generated candidates
        */
-      //LinkedList<Feature*> *splitFeature( double bbox[4]);
-
+      std::size_t createCandidatesOutsidePolygon( std::vector<std::unique_ptr<LabelPosition> > &lPos, Pal *pal );
 
       /**
-       * \brief return the feature id
-       * \return the feature id
+       * Tests whether this feature part belongs to the same QgsLabelFeature as another
+       * feature part.
+       * \param part part to compare to
+       * \returns TRUE if both parts belong to same QgsLabelFeature
        */
-      //int getId();
+      bool hasSameLabelFeatureAs( FeaturePart *part ) const;
 
       /**
-       * \brief return the layer that feature belongs to
-       * \return the layer of the feature
+       * Returns the width of the label, optionally taking an \a angle into account.
+       * \returns the width of the label
        */
-      Layer * getLayer();
+      double getLabelWidth( double angle = 0.0 ) const { return mLF->size( angle ).width(); }
 
       /**
-       * \brief save the feature into file
-       * Called by Pal::save()
-       * \param file the file to write
+       * Returns the height of the label, optionally taking an \a angle into account.
+       * \returns the hieght of the label
        */
-      //void save(std::ofstream *file);
+      double getLabelHeight( double angle = 0.0 ) const { return mLF->size( angle ).height(); }
 
       /**
-       * \brief generic method to generate candidates
-       * This method will call either setPositionFromPoint(), setPositionFromLine or setPositionFromPolygon
-       * \param scale the map scale is 1:scale
-       * \param lPos pointer to candidates array in which candidates will be put
-       * \param bbox_min min values of the map extent
-       * \param bbox_max max values of the map extent
-       * \param mapShape generate candidates for this spatial entites
-       * \param candidates index for candidates
-       * \param svgmap svg map file
-       * \return the number of candidates in *lPos
+       * Returns the distance from the anchor point to the label
+       * \returns the distance to the label
        */
-      int setPosition( double scale, LabelPosition ***lPos, double bbox_min[2], double bbox_max[2], PointSet *mapShape, RTree<LabelPosition*, double, 2, double>*candidates
-#ifdef _EXPORT_MAP_
-                       , std::ofstream &svgmap
-#endif
-                     );
+      double getLabelDistance() const { return mLF->distLabel(); }
+
+      //! Returns TRUE if the feature's label has a fixed rotation
+      bool hasFixedRotation() const { return mLF->hasFixedAngle(); }
+
+      //! Returns the fixed angle for the feature's label
+      double fixedAngle() const { return mLF->fixedAngle(); }
+
+      //! Returns TRUE if the feature's label has a fixed position
+      bool hasFixedPosition() const { return mLF->hasFixedPosition(); }
 
       /**
-       * \brief get the unique id of the feature
-       * \return the feature unique identifier
+       * Returns TRUE if the feature's label should always been shown,
+       * even when it collides with other labels
        */
-      const char *getUID();
-
+      bool alwaysShow() const { return mLF->alwaysShow(); }
 
       /**
-       * \brief Print feature informations
-       * Print feature unique id, geometry type, points, and holes on screen
+       * Returns the feature's obstacle settings.
        */
-      void print();
+      const QgsLabelObstacleSettings &obstacleSettings() const { return mLF->obstacleSettings(); }
 
+      //! Returns the distance between repeating labels for this feature
+      double repeatDistance() const { return mLF->repeatDistance(); }
 
-      PalGeometry* getUserGeometry() { return f->userGeom; }
+      //! Gets number of holes (inner rings) - they are considered as obstacles
+      int getNumSelfObstacles() const { return mHoles.count(); }
+      //! Gets hole (inner ring) - considered as obstacle
+      FeaturePart *getSelfObstacle( int i ) { return mHoles.at( i ); }
 
-      void setLabelSize( double lx, double ly ) { f->label_x = lx; f->label_y = ly; }
-      double getLabelWidth() const { return f->label_x; }
-      double getLabelHeight() const { return f->label_y; }
-      void setLabelDistance( double dist ) { f->distlabel = dist; }
-      double getLabelDistance() const { return f->distlabel; }
-      void setLabelInfo( LabelInfo* info ) { f->labelInfo = info; }
+      //! Check whether this part is connected with some other part
+      bool isConnected( FeaturePart *p2 );
 
-      bool getFixedRotation() { return f->fixedRotation; }
-      double getLabelAngle() { return f->fixedAngle; }
-      bool getFixedPosition() { return f->fixedPos; }
-      bool getAlwaysShow() { return f->alwaysShow; }
+      /**
+       * Merge other (connected) part with this one and save the result in this part (other is unchanged).
+       * Returns TRUE on success, FALSE if the feature wasn't modified.
+      */
+      bool mergeWithFeaturePart( FeaturePart *other );
 
-      int getNumSelfObstacles() const { return nbHoles; }
-      PointSet* getSelfObstacle( int i ) { return holes[i]; }
+      /**
+       * Increases the cost of the label candidates for this feature, based on the size of the feature.
+       *
+       * E.g. small lines or polygons get higher cost so that larger features are more likely to be labeled.
+       */
+      void addSizePenalty( std::vector<std::unique_ptr<LabelPosition> > &lPos, double bbx[4], double bby[4] );
 
-      /** check whether this part is connected with some other part */
-      bool isConnected( FeaturePart* p2 );
+      /**
+       * Calculates the priority for the feature. This will be the feature's priority if set,
+       * otherwise the layer's default priority.
+       */
+      double calculatePriority() const;
 
-      /** merge other (connected) part with this one and save the result in this part (other is unchanged).
-       * Return true on success, false if the feature wasn't modified */
-      bool mergeWithFeaturePart( FeaturePart* other );
+      //! Returns TRUE if feature's label must be displayed upright
+      bool showUprightLabels() const;
 
-      void addSizePenalty( int nbp, LabelPosition** lPos, double bbx[4], double bby[4] );
+      //! Returns TRUE if the next char position is found. The referenced parameters are updated.
+      bool nextCharPosition( double charWidth, double segmentLength, PointSet *path_positions, int &index, double &currentDistanceAlongSegment,
+                             double &characterStartX, double &characterStartY, double &characterEndX, double &characterEndY ) const;
 
+      /**
+       * Returns the total number of repeating labels associated with this label.
+       * \see setTotalRepeats()
+       */
+      int totalRepeats() const;
+
+      /**
+       * Returns the total number of repeating labels associated with this label.
+       * \see totalRepeats()
+       */
+      void setTotalRepeats( int repeats );
+
+    protected:
+
+      QgsLabelFeature *mLF = nullptr;
+      QList<FeaturePart *> mHoles;
+
+      //! \brief read coordinates from a GEOS geom
+      void extractCoords( const GEOSGeometry *geom );
+
+    private:
+
+      LabelPosition::Quadrant quadrantFromOffset() const;
+
+      int mTotalRepeats = 0;
+
+      mutable std::size_t mCachedMaxLineCandidates = 0;
+      mutable std::size_t mCachedMaxPolygonCandidates = 0;
+
+      FeaturePart &operator= ( const FeaturePart & ) = delete;
   };
 
 } // end namespace pal

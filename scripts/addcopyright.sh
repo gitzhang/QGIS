@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ###########################################################################
 #    addcopyright.sh
 #    ---------------------
@@ -16,6 +16,8 @@
 
 # licensecheck -r src
 
+export LC_TIME=C
+
 set -e
 
 if [ $# -gt 0 ]; then
@@ -28,28 +30,28 @@ else
 fi
 
 for i in $FILES; do
-	echo $i >&2
+	echo "${i}" >&2
 	author=
 	authordate=
 	eval $(git log --reverse --pretty="export author='%an' authordate=\"\$(date --date='%ai' +'%%B %Y')\"" $i | head -1)
-	basename=$(basename $i)
+	basename=$(basename "${i}")
 	authoryear=${authordate#* }
 
         case $i in
 	# Override author if initial commit was by someone else
-	python/plugins/sextante/*)
+	python/plugins/processing/*)
 		author=volayaf
 		;;
 
-	src/app/gps/qwtpolar-*|src/app/qtmain_android.cpp|src/core/spatialite/*|src/core/spatialindex/src/*|src/core/gps/qextserialport/*|src/astyle/*|python/pyspatialite/*|src/providers/sqlanywhere/sqlanyconnection/*)
+	src/app/qtmain_android.cpp)
 		# Skip third party files
-                echo $f skipped
+                echo "${i} skipped"
                 continue
                 ;;
 
 	esac
 
-	case $author in
+	case "${author}" in
 	morb_au)
 		authorname="Brendan Morley"
 		authoremail="morb at ozemail dot com dot au"
@@ -145,6 +147,91 @@ for i in $FILES; do
 		authoremail="tim at linfiniti dot com"
 		;;
 
+	"Matthias Kuhn")
+		authorname="Matthias Kuhn"
+		authoremail="matthias at opengis dot ch"
+		;;
+
+	"Emilio Loi")
+		authorname="Emilio Loi"
+		authoremail="loi at faunalia dot it"
+		;;
+
+	"Nathan Woodrow"|Nathan)
+		authorname="Nathan Woodrow"
+		authoremail="woodrow dot nathan at gmail dot com"
+		;;
+
+	"Sandro Mani")
+		authorname="Sandro Mani"
+		authoremail="smani at sourcepole dot ch"
+		;;
+
+	"Chris Crook")
+		authorname="Chris Crook"
+		authoremail="ccrook at linz dot govt dot nz"
+		;;
+
+	"Hugo Mercier")
+		authorname="Hugo Mercier"
+		authoremail="hugo dot mercier at oslandia dot com"
+		;;
+
+	"Larry Shaffer")
+		authorname="Larry Shaffer"
+		authoremail="larrys at dakotacarto dot com"
+		;;
+
+	"Victor Olaya"|volaya)
+		authorname="Victor Olaya"
+		authoremail="volayaf at gmail dot com"
+		;;
+
+	elpaso)
+		authorname="Alessandro Pasotti"
+		authoremail="elpaso at itopen dot it"
+		;;
+
+        "Patrick Valsecchi")
+		authorname="Patrick Valsecchi"
+		authoremail="patrick dot valsecchi at camptocamp dot com"
+		;;
+
+	"Stéphane Brunner")
+		authorname="Stéphane Brunner"
+		authoremail="stephane dot brunner at camptocamp dot com"
+		;;
+
+	"ersts")
+		authorname="Peter Ersts"
+		authoremail="ersts at amnh dot org"
+		;;
+
+	"Etienne Tourigny")
+		authorname="Etienne Tourigny"
+		authoremail="etourigny dot dev at gmail dot com"
+		;;
+
+	"Nyall Dawson")
+		authorname="Nyall Dawson"
+		authoremail="nyall dot dawson at gmail dot com"
+		;;
+
+	"David")
+		authorname="David Signer"
+		authoremail="david at opengis dot ch"
+		;;
+
+	"Etienne Trimaille")
+		authorname="Etienne Trimaille"
+		authoremail="etienne dot trimaille at gmail dot com"
+		;;
+
+	"David Marteau")
+		authorname="David Marteau"
+		authoremail="david at innophi dot com"
+		;;
+
 	*)
 		echo "Author $author not found."
 		exit 1
@@ -215,8 +302,6 @@ $shebang# -*- coding: utf-8 -*-
 __author__ = '$authorname'
 __date__ = '$authordate'
 __copyright__ = '(C) $authoryear, $authorname'
-# This will get replaced with a git SHA1 when you do a git archive
-__revision__ = '\$Format:%H$'
 
 EOF
 		;;

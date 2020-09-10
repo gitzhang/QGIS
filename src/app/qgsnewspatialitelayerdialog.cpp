@@ -1,6 +1,6 @@
 /***************************************************************************
                          qgsnewspatialitelayerdialog.cpp
-        Creates a new Spatialite layer. This dialog borrows heavily from
+        Creates a new SpatiaLite layer. This dialog borrows heavily from
         qgsnewvectorlayerdialog.cpp
                              -------------------
     begin                : 2010-03-18
@@ -22,79 +22,98 @@
 
 #include "qgis.h"
 #include "qgsapplication.h"
-#include "qgsproviderregistry.h"
+#include "qgsabstractdatabaseproviderconnection.h"
 #include "qgisapp.h" // <- for theme icons
-#include <qgsvectorlayer.h>
-#include <qgsmaplayerregistry.h>
+#include "qgsvectorlayer.h"
+#include "qgsproject.h"
 #include "qgscoordinatereferencesystem.h"
-#include "qgsgenericprojectionselector.h"
-
+#include "qgsfileutils.h"
+#include "qgsprojectionselectiondialog.h"
+#include "qgsproviderconnectionmodel.h"
+#include "qgsprovidermetadata.h"
+#include "qgsproviderregistry.h"
+#include "qgsspatialiteutils.h"
 #include "qgslogger.h"
+#include "qgssettings.h"
+#include "qgsgui.h"
 
 #include <QPushButton>
-#include <QSettings>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QFileDialog>
-#include <QLibrary>
 
 #include <spatialite.h>
 
-QgsNewSpatialiteLayerDialog::QgsNewSpatialiteLayerDialog( QWidget *parent, Qt::WFlags fl )
-    : QDialog( parent, fl )
+QgsNewSpatialiteLayerDialog::QgsNewSpatialiteLayerDialog( QWidget *parent, Qt::WindowFlags fl, const QgsCoordinateReferenceSystem &defaultCrs )
+  : QDialog( parent, fl )
 {
   setupUi( this );
+  QgsGui::enableAutoGeometryRestore( this );
 
-  QSettings settings;
-  restoreGeometry( settings.value( "/Windows/NewSpatiaLiteLayer/geometry" ).toByteArray() );
+  mGeometryTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconTableLayer.svg" ) ), tr( "No Geometry" ), QString() );
+  mGeometryTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconPointLayer.svg" ) ), tr( "Point" ), QStringLiteral( "POINT" ) );
+  mGeometryTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconLineLayer.svg" ) ), tr( "Line" ), QStringLiteral( "LINESTRING" ) );
+  mGeometryTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconPolygonLayer.svg" ) ), tr( "Polygon" ), QStringLiteral( "POLYGON" ) );
+  mGeometryTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconPointLayer.svg" ) ), tr( "MultiPoint" ), QStringLiteral( "MULTIPOINT" ) );
+  mGeometryTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconLineLayer.svg" ) ), tr( "MultiLine" ), QStringLiteral( "MULTILINESTRING" ) );
+  mGeometryTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconPolygonLayer.svg" ) ), tr( "MultiPolygon" ), QStringLiteral( "MULTIPOLYGON" ) );
+  mGeometryTypeBox->setCurrentIndex( -1 );
 
-  mAddAttributeButton->setIcon( QgsApplication::getThemeIcon( "/mActionNewAttribute.png" ) );
-  mRemoveAttributeButton->setIcon( QgsApplication::getThemeIcon( "/mActionDeleteAttribute.png" ) );
-  mTypeBox->addItem( tr( "Text data" ), "text" );
-  mTypeBox->addItem( tr( "Whole number" ), "integer" );
-  mTypeBox->addItem( tr( "Decimal number" ), "real" );
+  pbnFindSRID->setEnabled( false );
+  mGeometryWithZCheckBox->setEnabled( false );
+  mGeometryWithMCheckBox->setEnabled( false );
+  leGeometryColumn->setEnabled( false );
+  leGeometryColumn->setText( QStringLiteral( "geometry" ) );
 
-  mPointRadioButton->setChecked( true );
-  // Populate the database list from the stored connections
-  settings.beginGroup( "/SpatiaLite/connections" );
-  QStringList keys = settings.childGroups();
-  QStringList::Iterator it = keys.begin();
-  mDatabaseComboBox->clear();
-  while ( it != keys.end() )
-  {
-    // retrieving the SQLite DB name and full path
-    QString text = settings.value( *it + "/sqlitepath", "###unknown###" ).toString();
-    mDatabaseComboBox->addItem( text );
-    ++it;
-  }
-  settings.endGroup();
+  mAddAttributeButton->setIcon( QgsApplication::getThemeIcon( QStringLiteral( "/mActionNewAttribute.svg" ) ) );
+  mRemoveAttributeButton->setIcon( QgsApplication::getThemeIcon( QStringLiteral( "/mActionDeleteAttribute.svg" ) ) );
+  mTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconFieldText.svg" ) ), tr( "Text Data" ), "text" );
+  mTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconFieldInteger.svg" ) ), tr( "Whole Number" ), "integer" );
+  mTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconFieldFloat.svg" ) ), tr( "Decimal Number" ), "real" );
+  mTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconFieldDate.svg" ) ), tr( "Date" ), "date" );
+  mTypeBox->addItem( QgsApplication::getThemeIcon( QStringLiteral( "/mIconFieldDateTime.svg" ) ), tr( "Date and Time" ), "timestamp" );
+
+  mDatabaseComboBox->setProvider( QStringLiteral( "spatialite" ) );
 
   mOkButton = buttonBox->button( QDialogButtonBox::Ok );
   mOkButton->setEnabled( false );
 
   // Set the SRID box to a default of WGS84
-  QgsCoordinateReferenceSystem srs;
-  srs.createFromOgcWmsCrs( GEO_EPSG_CRS_AUTHID );
-  srs.validate();
-  mCrsId = srs.authid();
-  leSRID->setText( srs.authid() + " - " + srs.description() );
+  mCrsId = defaultCrs.authid();
+  leSRID->setText( defaultCrs.userFriendlyIdentifier() );
 
   pbnFindSRID->setEnabled( mDatabaseComboBox->count() );
 
-  connect( mNameEdit, SIGNAL( textChanged( QString ) ), this, SLOT( nameChanged( QString ) ) );
-  connect( mAttributeView, SIGNAL( itemSelectionChanged() ), this, SLOT( selectionChanged() ) );
+  connect( mNameEdit, &QLineEdit::textChanged, this, &QgsNewSpatialiteLayerDialog::nameChanged );
+  connect( mAttributeView, &QTreeWidget::itemSelectionChanged, this, &QgsNewSpatialiteLayerDialog::selectionChanged );
+  connect( leLayerName, &QLineEdit::textChanged, this, &QgsNewSpatialiteLayerDialog::checkOk );
+  connect( checkBoxPrimaryKey, &QAbstractButton::clicked, this, &QgsNewSpatialiteLayerDialog::checkOk );
+  connect( mAddAttributeButton, &QToolButton::clicked, this, &QgsNewSpatialiteLayerDialog::mAddAttributeButton_clicked );
+  connect( mRemoveAttributeButton, &QToolButton::clicked, this, &QgsNewSpatialiteLayerDialog::mRemoveAttributeButton_clicked );
+  connect( mGeometryTypeBox, static_cast<void ( QComboBox::* )( int )>( &QComboBox::currentIndexChanged ), this, &QgsNewSpatialiteLayerDialog::mGeometryTypeBox_currentIndexChanged );
+  connect( mTypeBox, static_cast<void ( QComboBox::* )( int )>( &QComboBox::currentIndexChanged ), this, &QgsNewSpatialiteLayerDialog::mTypeBox_currentIndexChanged );
+  connect( pbnFindSRID, &QPushButton::clicked, this, &QgsNewSpatialiteLayerDialog::pbnFindSRID_clicked );
+  connect( toolButtonNewDatabase, &QToolButton::clicked, this, &QgsNewSpatialiteLayerDialog::createDb );
+  connect( buttonBox, &QDialogButtonBox::accepted, this, &QgsNewSpatialiteLayerDialog::buttonBox_accepted );
+  connect( buttonBox, &QDialogButtonBox::rejected, this, &QgsNewSpatialiteLayerDialog::buttonBox_rejected );
+
+  connect( buttonBox, &QDialogButtonBox::helpRequested, this, &QgsNewSpatialiteLayerDialog::showHelp );
 
   mAddAttributeButton->setEnabled( false );
   mRemoveAttributeButton->setEnabled( false );
 }
 
-QgsNewSpatialiteLayerDialog::~QgsNewSpatialiteLayerDialog()
+void QgsNewSpatialiteLayerDialog::mGeometryTypeBox_currentIndexChanged( int index )
 {
-  QSettings settings;
-  settings.setValue( "/Windows/NewSpatiaLiteLayer/geometry", saveGeometry() );
+  pbnFindSRID->setEnabled( index != 0 );
+  mGeometryWithZCheckBox->setEnabled( index != 0 );
+  mGeometryWithMCheckBox->setEnabled( index != 0 );
+  leGeometryColumn->setEnabled( index != 0 );
+
+  checkOk();
 }
 
-void QgsNewSpatialiteLayerDialog::on_mTypeBox_currentIndexChanged( int index )
+void QgsNewSpatialiteLayerDialog::mTypeBox_currentIndexChanged( int index )
 {
   // This isn't used since widths are irrelevant in sqlite3
   switch ( index )
@@ -102,207 +121,177 @@ void QgsNewSpatialiteLayerDialog::on_mTypeBox_currentIndexChanged( int index )
     case 0: // Text data
     case 1: // Whole number
     case 2: // Decimal number
+    case 3: // Date
+    case 4: // Date time
     default:
       break;
   }
 }
 
-void QgsNewSpatialiteLayerDialog::on_toolButtonNewDatabase_clicked()
-{
-  QString fileName = QFileDialog::getSaveFileName( this, tr( "New SpatiaLite Database File" ),
-                     ".",
-                     tr( "SpatiaLite" ) + " (*.sqlite *.db)" );
-
-  if ( fileName.isEmpty() )
-    return;
-
-  if ( !fileName.toLower().endsWith( ".sqlite" ) && !fileName.toLower().endsWith( ".db" ) )
-  {
-    fileName += ".sqlite";
-  }
-
-  mDatabaseComboBox->insertItem( 0, fileName );
-  mDatabaseComboBox->setCurrentIndex( 0 );
-  createDb();
-}
-
 QString QgsNewSpatialiteLayerDialog::selectedType() const
 {
-  if ( mPointRadioButton->isChecked() )
-  {
-    return "POINT";
-  }
-  else if ( mLineRadioButton->isChecked() )
-  {
-    return "LINESTRING";
-  }
-  else if ( mPolygonRadioButton->isChecked() )
-  {
-    return "POLYGON";
-  }
-  else if ( mMultipointRadioButton->isChecked() )
-  {
-    return "MULTIPOINT";
-  }
-  else if ( mMultilineRadioButton->isChecked() )
-  {
-    return "MULTILINESTRING";
-  }
-  else if ( mMultipolygonRadioButton->isChecked() )
-  {
-    return "MULTIPOLYGON";
-  }
-
-  Q_ASSERT( "no type selected" == 0 );
-  return "";
+  return mGeometryTypeBox->currentData( Qt::UserRole ).toString();
 }
 
-void QgsNewSpatialiteLayerDialog::on_leLayerName_textChanged( QString text )
+QString QgsNewSpatialiteLayerDialog::selectedZM() const
 {
-  Q_UNUSED( text );
-  bool created  = leLayerName->text().length() > 0 && mAttributeView->topLevelItemCount() > 0 && createDb();
+  if ( mGeometryWithZCheckBox->isChecked() && !mGeometryWithMCheckBox->isChecked() )
+  {
+    return QStringLiteral( "XYZ" );
+  }
+  else if ( !mGeometryWithZCheckBox->isChecked() && mGeometryWithMCheckBox->isChecked() )
+  {
+    return QStringLiteral( "XYM" );
+  }
+  else if ( mGeometryWithZCheckBox->isChecked() && mGeometryWithMCheckBox->isChecked() )
+  {
+    return QStringLiteral( "XYZM" );
+  }
+
+  return QStringLiteral( "XY" );
+}
+
+void QgsNewSpatialiteLayerDialog::checkOk()
+{
+  bool created  = !leLayerName->text().isEmpty() && mGeometryTypeBox->currentIndex() != -1 &&
+                  ( checkBoxPrimaryKey->isChecked() || mAttributeView->topLevelItemCount() > 0 );
   mOkButton->setEnabled( created );
 }
 
-void QgsNewSpatialiteLayerDialog::on_mAddAttributeButton_clicked()
+void QgsNewSpatialiteLayerDialog::mAddAttributeButton_clicked()
 {
-  if ( mNameEdit->text().length() > 0 )
+  if ( !mNameEdit->text().isEmpty() )
   {
     QString myName = mNameEdit->text();
     //use userrole to avoid translated type string
-    QString myType = mTypeBox->itemData( mTypeBox->currentIndex(), Qt::UserRole ).toString();
+    QString myType = mTypeBox->currentData( Qt::UserRole ).toString();
     mAttributeView->addTopLevelItem( new QTreeWidgetItem( QStringList() << myName << myType ) );
-    if ( mAttributeView->topLevelItemCount() > 0  && leLayerName->text().length() > 0 )
-    {
-      bool created = createDb();
-      mOkButton->setEnabled( created );
-    }
+
+    checkOk();
+
     mNameEdit->clear();
   }
 }
 
-void QgsNewSpatialiteLayerDialog::on_mRemoveAttributeButton_clicked()
+void QgsNewSpatialiteLayerDialog::mRemoveAttributeButton_clicked()
 {
   delete mAttributeView->currentItem();
-  if ( mAttributeView->topLevelItemCount() == 0 )
-  {
-    mOkButton->setEnabled( false );
-  }
+
+  checkOk();
 }
 
-void QgsNewSpatialiteLayerDialog::on_pbnFindSRID_clicked()
+void QgsNewSpatialiteLayerDialog::pbnFindSRID_clicked()
 {
-  // first get list of supported SRID from the selected Spatialite database
+  const QgsDataSourceUri dbUri = mDatabaseComboBox->currentConnectionUri();
+  const QString dbPath = dbUri.database();
+
+  // first get list of supported SRID from the selected SpatiaLite database
   // to build filter for projection selector
-  sqlite3 *db = 0;
+  sqlite3_database_unique_ptr database;
   bool status = true;
-  if ( !db )
+  int rc = database.open_v2( dbPath, SQLITE_OPEN_READONLY, nullptr );
+  if ( rc != SQLITE_OK )
   {
-    int rc = sqlite3_open_v2( mDatabaseComboBox->currentText().toUtf8(), &db, SQLITE_OPEN_READONLY, NULL );
-    if ( rc != SQLITE_OK )
-    {
-      QMessageBox::warning( this, tr( "SpatiaLite Database" ), tr( "Unable to open the database" ) );
-      return;
-    }
+    QMessageBox::warning( this, tr( "SpatiaLite Database" ), tr( "Unable to open the database" ) );
+    return;
   }
 
   // load up the srid table
-  const char *pzTail;
-  sqlite3_stmt *ppStmt;
-  QString sql = "select auth_name || ':' || auth_srid from spatial_ref_sys order by srid asc";
+  sqlite3_statement_unique_ptr statement;
+  QString sql = QStringLiteral( "select auth_name || ':' || auth_srid from spatial_ref_sys order by srid asc" );
 
   QSet<QString> myCRSs;
 
-  int rc = sqlite3_prepare( db, sql.toUtf8(), sql.toUtf8().length(), &ppStmt, &pzTail );
+  statement = database.prepare( sql, rc );
   // XXX Need to free memory from the error msg if one is set
   if ( rc == SQLITE_OK )
   {
     // get the first row of the result set
-    while ( sqlite3_step( ppStmt ) == SQLITE_ROW )
+    while ( sqlite3_step( statement.get() ) == SQLITE_ROW )
     {
-      myCRSs.insert( QString::fromUtf8(( const char * )sqlite3_column_text( ppStmt, 0 ) ) );
+      myCRSs.insert( statement.columnAsText( 0 ) );
     }
   }
   else
   {
-    // XXX query failed -- warn the user some how
-    QMessageBox::warning( 0, tr( "Error" ),  tr( "Failed to load SRIDS: %1" ).arg( sqlite3_errmsg( db ) ) );
+    // XXX query failed -- warn the user somehow
+    QMessageBox::warning( nullptr, tr( "Error" ), tr( "Failed to load SRIDS: %1" ).arg( database.errorMessage() ) );
     status = false;
   }
-  // close the statement
-  sqlite3_finalize( ppStmt );
-  sqlite3_close( db );
 
-  if ( !status )
+  if ( status )
   {
-    return;
-  }
+    // prepare projection selector
+    QgsProjectionSelectionDialog *mySelector = new QgsProjectionSelectionDialog( this );
+    mySelector->setMessage( QString() );
+    mySelector->setOgcWmsCrsFilter( myCRSs );
+    mySelector->setCrs( QgsCoordinateReferenceSystem::fromOgcWmsCrs( mCrsId ) );
 
-  // prepare projection selector
-  QgsGenericProjectionSelector *mySelector = new QgsGenericProjectionSelector( this );
-  mySelector->setMessage();
-  mySelector->setOgcWmsCrsFilter( myCRSs );
-  mySelector->setSelectedAuthId( mCrsId );
-
-  if ( mySelector->exec() )
-  {
-    QgsCoordinateReferenceSystem srs;
-    srs.createFromOgcWmsCrs( mySelector->selectedAuthId() );
-    QString crsId = srs.authid();
-    if ( crsId != mCrsId )
+    if ( mySelector->exec() )
     {
-      mCrsId = crsId;
-      leSRID->setText( srs.authid() + " - " + srs.description() );
+      QgsCoordinateReferenceSystem srs = mySelector->crs();
+      QString crsId = srs.authid();
+      if ( crsId != mCrsId )
+      {
+        mCrsId = crsId;
+        leSRID->setText( srs.userFriendlyIdentifier() );
+      }
     }
+    delete mySelector;
   }
-  delete mySelector;
 }
 
-void QgsNewSpatialiteLayerDialog::nameChanged( QString name )
+void QgsNewSpatialiteLayerDialog::nameChanged( const QString &name )
 {
-  mAddAttributeButton->setDisabled( name.isEmpty() || mAttributeView->findItems( name, Qt::MatchExactly ).size() > 0 );
+  mAddAttributeButton->setDisabled( name.isEmpty() || ! mAttributeView->findItems( name, Qt::MatchExactly ).isEmpty() );
 }
 
 void QgsNewSpatialiteLayerDialog::selectionChanged()
 {
-  mRemoveAttributeButton->setDisabled( mAttributeView->selectedItems().size() == 0 );
+  mRemoveAttributeButton->setDisabled( mAttributeView->selectedItems().isEmpty() );
 }
 
 bool QgsNewSpatialiteLayerDialog::createDb()
 {
-  QString dbPath = mDatabaseComboBox->currentText();
+  QString dbPath = QFileDialog::getSaveFileName( this, tr( "New SpatiaLite Database File" ),
+                   QDir::homePath(),
+                   tr( "SpatiaLite" ) + " (*.sqlite *.db *.sqlite3 *.db3 *.s3db)", nullptr, QFileDialog::DontConfirmOverwrite );
+
   if ( dbPath.isEmpty() )
     return false;
 
+  QgsFileUtils::ensureFileNameHasExtension( dbPath, QStringList() << QStringLiteral( ".sqlite" ) << QLatin1String( ".db" ) << QLatin1String( ".sqlite3" )
+      << QLatin1String( ".db3" ) << QLatin1String( ".s3db" ) );
   QFile newDb( dbPath );
+  if ( newDb.exists() )
+  {
+    QMessageBox msgBox;
+    msgBox.setIcon( QMessageBox::Question );
+    msgBox.setWindowTitle( tr( "New SpatiaLite Layer" ) );
+    msgBox.setText( tr( "The file already exists. Do you want to overwrite the existing file with a new database or add a new layer to it?" ) );
+    QPushButton *overwriteButton = msgBox.addButton( tr( "Overwrite" ), QMessageBox::ActionRole );
+    QPushButton *addNewLayerButton = msgBox.addButton( tr( "Add New Layer" ), QMessageBox::ActionRole );
+    msgBox.setStandardButtons( QMessageBox::Cancel );
+    msgBox.setDefaultButton( addNewLayerButton );
+    int ret = msgBox.exec();
+    if ( ret == QMessageBox::Cancel )
+    {
+      return false;
+    }
+
+    if ( msgBox.clickedButton() == overwriteButton )
+    {
+      newDb.remove();
+    }
+  }
+
   if ( !newDb.exists() )
   {
     QString errCause;
-    bool res = false;
-
-    QString spatialite_lib = QgsProviderRegistry::instance()->library( "spatialite" );
-    QLibrary* myLib = new QLibrary( spatialite_lib );
-    bool loaded = myLib->load();
-    if ( loaded )
-    {
-      QgsDebugMsg( "spatialite provider loaded" );
-
-      typedef bool ( *createDbProc )( const QString&, QString& );
-      createDbProc createDbPtr = ( createDbProc ) cast_to_fptr( myLib->resolve( "createDb" ) );
-      if ( createDbPtr )
-      {
-        res = createDbPtr( dbPath, errCause );
-      }
-      else
-      {
-        errCause = "Resolving createDb(...) failed";
-      }
-    }
-    delete myLib;
-
+    bool res = QgsProviderRegistry::instance()->createDb( QStringLiteral( "spatialite" ), dbPath, errCause );
     if ( !res )
     {
-      QMessageBox::warning( 0, tr( "SpatiaLite Database" ), errCause );
+      QMessageBox::warning( nullptr, tr( "SpatiaLite Database" ), errCause );
       pbnFindSRID->setEnabled( false );
     }
   }
@@ -311,142 +300,148 @@ bool QgsNewSpatialiteLayerDialog::createDb()
   if ( !fi.exists() )
   {
     pbnFindSRID->setEnabled( false );
-    return false;
   }
-
-  QString key = "/SpatiaLite/connections/" + fi.fileName() + "/sqlitepath";
-
-  QSettings settings;
-  if ( !settings.contains( key ) )
+  else
   {
-    settings.setValue( "/SpatiaLite/connections/selected", fi.fileName() + tr( "@" ) + fi.canonicalFilePath() );
-    settings.setValue( key, fi.canonicalFilePath() );
-
-    QMessageBox::information( 0, tr( "SpatiaLite Database" ), tr( "Registered new database!" ) );
+    QgsProviderMetadata *md { QgsProviderRegistry::instance()->providerMetadata( QStringLiteral( "spatialite" ) ) };
+    std::unique_ptr<QgsAbstractDatabaseProviderConnection> conn( static_cast<QgsAbstractDatabaseProviderConnection *>( md->createConnection( QStringLiteral( "dbname='%1'" ).arg( dbPath ), QVariantMap() ) ) );
+    if ( conn )
+    {
+      md->saveConnection( conn.get(), fi.fileName() );
+      mDatabaseComboBox->setConnection( fi.fileName() );
+      pbnFindSRID->setEnabled( true );
+      return true;
+    }
   }
 
-  pbnFindSRID->setEnabled( true );
-
-  return true;
+  return false;
 }
 
-void QgsNewSpatialiteLayerDialog::on_buttonBox_accepted()
+void QgsNewSpatialiteLayerDialog::buttonBox_accepted()
 {
   if ( apply() )
     accept();
 }
 
-void QgsNewSpatialiteLayerDialog::on_buttonBox_rejected()
+void QgsNewSpatialiteLayerDialog::buttonBox_rejected()
 {
   reject();
 }
 
 bool QgsNewSpatialiteLayerDialog::apply()
 {
+  const QgsDataSourceUri dbUri = mDatabaseComboBox->currentConnectionUri();
+  const QString dbPath = dbUri.database();
+
   // Build up the sql statement for creating the table
-  QString sql = QString( "create table %1(" ).arg( quotedIdentifier( leLayerName->text() ) );
-  QString delim = "";
+  QString sql = QStringLiteral( "create table %1(" ).arg( quotedIdentifier( leLayerName->text() ) );
+  QString delim;
 
   if ( checkBoxPrimaryKey->isChecked() )
   {
-    sql += "pkuid integer primary key autoincrement,";
+    sql += QLatin1String( "pkuid integer primary key autoincrement" );
+    delim = QStringLiteral( "," );
   }
 
   QTreeWidgetItemIterator it( mAttributeView );
   while ( *it )
   {
-    sql += delim + QString( "%1 %2" ).arg( quotedIdentifier(( *it )->text( 0 ) ) ).arg(( *it )->text( 1 ) );
-
-    delim = ",";
-
+    sql += delim + QStringLiteral( "%1 %2" ).arg( quotedIdentifier( ( *it )->text( 0 ) ), ( *it )->text( 1 ) );
+    delim = QStringLiteral( "," );
     ++it;
   }
-
   // complete the create table statement
-  sql += ")";
+  sql += ')';
 
-  QgsDebugMsg( QString( "Creating table in database %1" ).arg( mDatabaseComboBox->currentText() ) );
+  QgsDebugMsg( QStringLiteral( "Creating table in database %1" ).arg( dbPath ) );
+  QgsDebugMsg( sql );
 
-  QgsDebugMsg( sql ); // OK
-
-  QString sqlAddGeom = QString( "select AddGeometryColumn(%1,%2,%3,%4,2)" )
-                       .arg( quotedValue( leLayerName->text() ) )
-                       .arg( quotedValue( leGeometryColumn->text() ) )
-                       .arg( mCrsId.split( ':' ).value( 1, "0" ).toInt() )
-                       .arg( quotedValue( selectedType() ) );
-  QgsDebugMsg( sqlAddGeom ); // OK
-
-  QString sqlCreateIndex = QString( "select CreateSpatialIndex(%1,%2)" )
-                           .arg( quotedValue( leLayerName->text() ) )
-                           .arg( quotedValue( leGeometryColumn->text() ) );
-  QgsDebugMsg( sqlCreateIndex ); // OK
-
-  spatialite_init( 0 );
-
-  sqlite3 *db;
-  int rc = sqlite3_open( mDatabaseComboBox->currentText().toUtf8(), &db );
+  spatialite_database_unique_ptr database;
+  int rc = database.open( dbPath );
   if ( rc != SQLITE_OK )
   {
     QMessageBox::warning( this,
                           tr( "SpatiaLite Database" ),
-                          tr( "Unable to open the database: %1" ).arg( mDatabaseComboBox->currentText() ) );
+                          tr( "Unable to open the database: %1" ).arg( dbPath ) );
+    return false;
   }
-  else
+
+  char *errmsg = nullptr;
+
+  // create the table
+  rc = sqlite3_exec( database.get(), sql.toUtf8(), nullptr, nullptr, &errmsg );
+  if ( rc != SQLITE_OK )
   {
-    char * errmsg;
-    rc = sqlite3_exec( db, sql.toUtf8(), NULL, NULL, &errmsg );
+    QMessageBox::warning( this,
+                          tr( "Error Creating SpatiaLite Table" ),
+                          tr( "Failed to create the SpatiaLite table %1. The database returned:\n%2" ).arg( leLayerName->text(), errmsg ) );
+    sqlite3_free( errmsg );
+    return false;
+  }
+
+  // create the geometry column and the spatial index
+  if ( mGeometryTypeBox->currentIndex() != 0 )
+  {
+    QString sqlAddGeom = QStringLiteral( "select AddGeometryColumn(%1,%2,%3,%4,%5)" )
+                         .arg( QgsSqliteUtils::quotedString( leLayerName->text() ),
+                               QgsSqliteUtils::quotedString( leGeometryColumn->text() ) )
+                         .arg( mCrsId.split( ':' ).value( 1, QStringLiteral( "0" ) ).toInt() )
+                         .arg( QgsSqliteUtils::quotedString( selectedType() ) )
+                         .arg( QgsSqliteUtils::quotedString( selectedZM() ) );
+    QgsDebugMsg( sqlAddGeom );
+
+    rc = sqlite3_exec( database.get(), sqlAddGeom.toUtf8(), nullptr, nullptr, &errmsg );
     if ( rc != SQLITE_OK )
     {
       QMessageBox::warning( this,
-                            tr( "Error Creating SpatiaLite Table" ),
-                            tr( "Failed to create the SpatiaLite table %1. The database returned:\n%2" ).arg( leLayerName->text() ).arg( errmsg ) );
+                            tr( "Error Creating Geometry Column" ),
+                            tr( "Failed to create the geometry column. The database returned:\n%1" ).arg( errmsg ) );
       sqlite3_free( errmsg );
+      return false;
     }
-    else
-    {
-      // create the geometry column and the spatial index
-      rc = sqlite3_exec( db, sqlAddGeom.toUtf8(), NULL, NULL, &errmsg );
-      if ( rc != SQLITE_OK )
-      {
-        QMessageBox::warning( this,
-                              tr( "Error Creating Geometry Column" ),
-                              tr( "Failed to create the geometry column. The database returned:\n%1" ).arg( errmsg ) );
-        sqlite3_free( errmsg );
-      }
-      else
-      {
-        // create the spatial index
-        rc = sqlite3_exec( db, sqlCreateIndex.toUtf8(), NULL, NULL, &errmsg );
-        if ( rc != SQLITE_OK )
-        {
-          QMessageBox::warning( this,
-                                tr( "Error Creating Spatial Index" ),
-                                tr( "Failed to create the spatial index. The database returned:\n%1" ).arg( errmsg ) );
-          sqlite3_free( errmsg );
-        }
 
-        QgsVectorLayer *layer = new QgsVectorLayer( QString( "dbname='%1' table='%2'(%3) sql=" )
-            .arg( mDatabaseComboBox->currentText() )
-            .arg( leLayerName->text() )
-            .arg( leGeometryColumn->text() ), leLayerName->text(), "spatialite" );
-        if ( layer->isValid() )
-        {
-          // register this layer with the central layers registry
-          QList<QgsMapLayer *> myList;
-          myList << layer;
-          //addMapLayers returns a list of all successfully added layers
-          //so we compare that to our original list.
-          if ( myList == QgsMapLayerRegistry::instance()->addMapLayers( myList ) )
-            return true;
-        }
-        else
-        {
-          QgsDebugMsg( leLayerName->text() + " is an invalid layer - not loaded" );
-          QMessageBox::critical( this, tr( "Invalid Layer" ), tr( "%1 is an invalid layer and cannot be loaded." ).arg( leLayerName->text() ) );
-          delete layer;
-        }
-      }
+    QString sqlCreateIndex = QStringLiteral( "select CreateSpatialIndex(%1,%2)" )
+                             .arg( QgsSqliteUtils::quotedString( leLayerName->text() ),
+                                   QgsSqliteUtils::quotedString( leGeometryColumn->text() ) );
+    QgsDebugMsg( sqlCreateIndex );
+
+    rc = sqlite3_exec( database.get(), sqlCreateIndex.toUtf8(), nullptr, nullptr, &errmsg );
+    if ( rc != SQLITE_OK )
+    {
+      QMessageBox::warning( this,
+                            tr( "Error Creating Spatial Index" ),
+                            tr( "Failed to create the spatial index. The database returned:\n%1" ).arg( errmsg ) );
+      sqlite3_free( errmsg );
+      return false;
     }
+  }
+
+  const QgsVectorLayer::LayerOptions options { QgsProject::instance()->transformContext() };
+  const QString uri = QStringLiteral( "dbname='%1' table='%2'%3 sql=" ).arg( dbPath, leLayerName->text(),
+                      mGeometryTypeBox->currentIndex() != 0 ? QStringLiteral( "(%1)" ).arg( leGeometryColumn->text() ) : QString() );
+  QgsVectorLayer *layer = new QgsVectorLayer( QStringLiteral( "%1 table='%2'%3 sql=" )
+      .arg( mDatabaseComboBox->currentConnectionUri(),
+            leLayerName->text(),
+            mGeometryTypeBox->currentIndex() != 0 ? QStringLiteral( "(%1)" ).arg( leGeometryColumn->text() ) : QString() ),
+      leLayerName->text(), QStringLiteral( "spatialite" ), options );
+  if ( layer->isValid() )
+  {
+    // Reload connections to refresh browser panel
+    QgisApp::instance()->reloadConnections();
+
+    // register this layer with the central layers registry
+    QList<QgsMapLayer *> myList;
+    myList << layer;
+    //addMapLayers returns a list of all successfully added layers
+    //so we compare that to our original list.
+    if ( myList == QgsProject::instance()->addMapLayers( myList ) )
+      return true;
+  }
+  else
+  {
+    QgsDebugMsg( leLayerName->text() + " is an invalid layer - not loaded" );
+    QMessageBox::critical( this, tr( "SpatiaLite Database" ), tr( "%1 is an invalid layer and cannot be loaded." ).arg( leLayerName->text() ) );
+    delete layer;
   }
 
   return false;
@@ -454,14 +449,11 @@ bool QgsNewSpatialiteLayerDialog::apply()
 
 QString QgsNewSpatialiteLayerDialog::quotedIdentifier( QString id )
 {
-  id.replace( "\"", "\"\"" );
-  return id.prepend( "\"" ).append( "\"" );
+  id.replace( '\"', QLatin1String( "\"\"" ) );
+  return id.prepend( '\"' ).append( '\"' );
 }
 
-QString QgsNewSpatialiteLayerDialog::quotedValue( QString value )
+void QgsNewSpatialiteLayerDialog::showHelp()
 {
-  value.replace( "'", "''" );
-  return value.prepend( "'" ).append( "'" );
+  QgsHelp::openHelp( QStringLiteral( "managing_data_source/create_layers.html#creating-a-new-spatialite-layer" ) );
 }
-
-

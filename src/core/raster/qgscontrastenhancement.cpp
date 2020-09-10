@@ -25,45 +25,34 @@ class originally created circa 2004 by T.Sutton, Gary E.Sherman, Steve Halasz
 #include "qgslinearminmaxenhancement.h"
 #include "qgslinearminmaxenhancementwithclip.h"
 #include "qgscliptominmaxenhancement.h"
+#include "qgsrasterblock.h"
 #include <QDomDocument>
 #include <QDomElement>
 
-QgsContrastEnhancement::QgsContrastEnhancement( QGis::DataType theDataType )
+QgsContrastEnhancement::QgsContrastEnhancement( Qgis::DataType dataType )
+  : mMinimumValue( minimumValuePossible( dataType ) )
+  , mMaximumValue( maximumValuePossible( dataType ) )
+  , mRasterDataType( dataType )
+  , mRasterDataTypeRange( mMaximumValue - mMinimumValue )
+  , mLookupTableOffset( mMinimumValue * -1 )
 {
-  mLookupTable = 0;
-  mContrastEnhancementFunction = 0;
-  mEnhancementDirty = false;
-  mContrastEnhancementAlgorithm = NoEnhancement;
-  mRasterDataType = theDataType;
-
-  mMinimumValue = minimumValuePossible( mRasterDataType );
-  mMaximumValue = maximumValuePossible( mRasterDataType );
-  mRasterDataTypeRange = mMaximumValue - mMinimumValue;
-
-  mLookupTableOffset = mMinimumValue * -1;
-
-  mContrastEnhancementFunction = new QgsContrastEnhancementFunction( mRasterDataType, mMinimumValue, mMaximumValue );
+  mContrastEnhancementFunction.reset( new QgsContrastEnhancementFunction( mRasterDataType, mMinimumValue, mMaximumValue ) );
 
   //If the data type is larger than 16-bit do not generate a lookup table
   if ( mRasterDataTypeRange <= 65535.0 )
   {
-    mLookupTable = new int[static_cast <int>( mRasterDataTypeRange+1 )];
+    mLookupTable = new int[static_cast <int>( mRasterDataTypeRange + 1 )];
   }
-
 }
 
-QgsContrastEnhancement::QgsContrastEnhancement( const QgsContrastEnhancement& ce )
+QgsContrastEnhancement::QgsContrastEnhancement( const QgsContrastEnhancement &ce )
+  : mEnhancementDirty( true )
+  , mMinimumValue( ce.mMinimumValue )
+  , mMaximumValue( ce.mMaximumValue )
+  , mRasterDataType( ce.mRasterDataType )
+  , mRasterDataTypeRange( ce.mRasterDataTypeRange )
 {
-  mLookupTable = 0;
-  mContrastEnhancementFunction = 0;
-  mEnhancementDirty = true;
-  mRasterDataType = ce.mRasterDataType;
-
-  mMinimumValue = ce.mMinimumValue;
-  mMaximumValue = ce.mMaximumValue;
-  mRasterDataTypeRange = ce.mRasterDataTypeRange;
-
-  mLookupTableOffset = mMinimumValue * -1;
+  mLookupTableOffset = minimumValuePossible( mRasterDataType ) * -1;
 
   // setContrastEnhancementAlgorithm sets also QgsContrastEnhancementFunction
   setContrastEnhancementAlgorithm( ce.mContrastEnhancementAlgorithm, false );
@@ -71,131 +60,16 @@ QgsContrastEnhancement::QgsContrastEnhancement( const QgsContrastEnhancement& ce
   //If the data type is larger than 16-bit do not generate a lookup table
   if ( mRasterDataTypeRange <= 65535.0 )
   {
-    mLookupTable = new int[static_cast <int>( mRasterDataTypeRange+1 )];
+    mLookupTable = new int[static_cast <int>( mRasterDataTypeRange + 1 )];
   }
 }
 
 QgsContrastEnhancement::~QgsContrastEnhancement()
 {
   delete [] mLookupTable;
-  delete mContrastEnhancementFunction;
-}
-/*
- *
- * Static methods
- *
- */
-
-/**
-    Simple function to compute the maximum possible value for a data types.
-*/
-double QgsContrastEnhancement::maximumValuePossible( QGis::DataType theDataType )
-{
-  switch ( theDataType )
-  {
-    case QGis::Byte:
-      return std::numeric_limits<unsigned char>::max();
-      break;
-    case QGis::UInt16:
-      return std::numeric_limits<unsigned short>::max();
-      break;
-    case QGis::Int16:
-      return std::numeric_limits<short>::max();
-      break;
-    case QGis::UInt32:
-      return std::numeric_limits<unsigned int>::max();
-      break;
-    case QGis::Int32:
-      return std::numeric_limits<int>::max();
-      break;
-    case QGis::Float32:
-      return std::numeric_limits<float>::max();
-      break;
-    case QGis::Float64:
-      return std::numeric_limits<double>::max();
-      break;
-    case QGis::CInt16:
-      return std::numeric_limits<short>::max();
-      break;
-    case QGis::CInt32:
-      return std::numeric_limits<int>::max();
-      break;
-    case QGis::CFloat32:
-      return std::numeric_limits<float>::max();
-      break;
-    case QGis::CFloat64:
-      return std::numeric_limits<double>::max();
-      break;
-    case QGis::ARGB32:
-    case QGis::ARGB32_Premultiplied:
-    case QGis::UnknownDataType:
-      // XXX - mloskot: not handled?
-      break;
-  }
-
-  return std::numeric_limits<double>::max();
-}
-/**
-    Simple function to compute the minimum possible value for a data type.
-*/
-double QgsContrastEnhancement::minimumValuePossible( QGis::DataType theDataType )
-{
-  switch ( theDataType )
-  {
-    case QGis::Byte:
-      return std::numeric_limits<unsigned char>::min();
-      break;
-    case QGis::UInt16:
-      return std::numeric_limits<unsigned short>::min();
-      break;
-    case QGis::Int16:
-      return std::numeric_limits<short>::min();
-      break;
-    case QGis::UInt32:
-      return std::numeric_limits<unsigned int>::min();
-      break;
-    case QGis::Int32:
-      return std::numeric_limits<int>::min();
-      break;
-    case QGis::Float32:
-      return std::numeric_limits<float>::max() * -1.0;
-      break;
-    case QGis::Float64:
-      return std::numeric_limits<double>::max() * -1.0;
-      break;
-    case QGis::CInt16:
-      return std::numeric_limits<short>::min();
-      break;
-    case QGis::CInt32:
-      return std::numeric_limits<int>::min();
-      break;
-    case QGis::CFloat32:
-      return std::numeric_limits<float>::max() * -1.0;
-      break;
-    case QGis::CFloat64:
-      return std::numeric_limits<double>::max() * -1.0;
-      break;
-    case QGis::ARGB32:
-    case QGis::ARGB32_Premultiplied:
-    case QGis::UnknownDataType:
-      // XXX - mloskot: not handled?
-      break;
-  }
-
-  return std::numeric_limits<double>::max() * -1.0;
 }
 
-/*
- *
- * Non-Static methods
- *
- */
-/**
-    Public function to generate the enhanced for enhanceContrasted value for a given input.
-
-    @param theValue The pixel value to enhance
-*/
-int QgsContrastEnhancement::enhanceContrast( double theValue )
+int QgsContrastEnhancement::enhanceContrast( double value )
 {
   if ( mEnhancementDirty )
   {
@@ -204,20 +78,20 @@ int QgsContrastEnhancement::enhanceContrast( double theValue )
 
   if ( mLookupTable && NoEnhancement != mContrastEnhancementAlgorithm )
   {
-    return mLookupTable[static_cast <int>( theValue + mLookupTableOffset )];
+    double shiftedValue = value + mLookupTableOffset;
+    if ( shiftedValue >= 0 && shiftedValue < mRasterDataTypeRange + 1 )
+      return mLookupTable[static_cast <int>( shiftedValue )];
+    return 0;
   }
   else
   {
     // Even if the contrast enhancement algorithms is set to NoEnhancement
     // The input values will still have to be scaled for all data types
     // greater than 1 byte.
-    return mContrastEnhancementFunction->enhance( theValue );
+    return mContrastEnhancementFunction->enhance( value );
   }
 }
 
-/**
-    Generate a new lookup table
-*/
 bool QgsContrastEnhancement::generateLookupTable()
 {
   mEnhancementDirty = false;
@@ -226,121 +100,93 @@ bool QgsContrastEnhancement::generateLookupTable()
     return false;
   if ( NoEnhancement == mContrastEnhancementAlgorithm )
     return false;
-  if ( QGis::Byte != mRasterDataType && QGis::UInt16 != mRasterDataType && QGis::Int16 != mRasterDataType )
+  if ( Qgis::Byte != mRasterDataType && Qgis::UInt16 != mRasterDataType && Qgis::Int16 != mRasterDataType )
     return false;
   if ( !mLookupTable )
     return false;
 
-  QgsDebugMsg( "building lookup table" );
-  QgsDebugMsg( "***MinimumValue : " + QString::number( mMinimumValue ) );
-  QgsDebugMsg( "***MaximumValue : " + QString::number( mMaximumValue ) );
-  QgsDebugMsg( "***mLookupTableOffset : " + QString::number( mLookupTableOffset ) );
-  QgsDebugMsg( "***mRasterDataTypeRange : " + QString::number( mRasterDataTypeRange ) );
+  QgsDebugMsgLevel( QStringLiteral( "building lookup table" ), 4 );
+  QgsDebugMsgLevel( QStringLiteral( "***MinimumValue : %1" ).arg( mMinimumValue ), 4 );
+  QgsDebugMsgLevel( QStringLiteral( "***MaximumValue : %1" ).arg( mMaximumValue ), 4 );
+  QgsDebugMsgLevel( QStringLiteral( "***mLookupTableOffset : %1" ).arg( mLookupTableOffset ), 4 );
+  QgsDebugMsgLevel( QStringLiteral( "***mRasterDataTypeRange : %1" ).arg( mRasterDataTypeRange ), 4 );
 
   for ( int myIterator = 0; myIterator <= mRasterDataTypeRange; myIterator++ )
   {
-    mLookupTable[myIterator] = mContrastEnhancementFunction->enhance(( double )myIterator - mLookupTableOffset );
+    mLookupTable[myIterator] = mContrastEnhancementFunction->enhance( static_cast< double >( myIterator ) - mLookupTableOffset );
   }
 
   return true;
 }
 
-/**
-    Determine if a pixel is within in the displayable range.
-
-    @param theValue The pixel value to examine
-*/
-bool QgsContrastEnhancement::isValueInDisplayableRange( double theValue )
+bool QgsContrastEnhancement::isValueInDisplayableRange( double value )
 {
-
-  if ( 0 != mContrastEnhancementFunction )
+  if ( mContrastEnhancementFunction )
   {
-    return mContrastEnhancementFunction->isValueInDisplayableRange( theValue );
+    return mContrastEnhancementFunction->isValueInDisplayableRange( value );
   }
 
   return false;
 }
 
-/**
-    Set the contrast enhancement algorithm. The second parameter is optional and is for performace improvements. If you know you are immediately going to set the Minimum or Maximum value, you can elect to not generate the lookup tale. By default it will be generated.
-
-    @param theAlgorithm The new contrast enhancement algorithm
-    @param generateTable Flag to overide automatic look up table generation
-*/
-void QgsContrastEnhancement::setContrastEnhancementAlgorithm( ContrastEnhancementAlgorithm theAlgorithm, bool generateTable )
+void QgsContrastEnhancement::setContrastEnhancementAlgorithm( ContrastEnhancementAlgorithm algorithm, bool generateTable )
 {
-  QgsDebugMsg( "called algorithm: " + QString::number(( int )theAlgorithm ) + " generate lookup table: " + QString::number(( int )generateTable ) );
-
-  if ( theAlgorithm != mContrastEnhancementAlgorithm )
+  switch ( algorithm )
   {
-    switch ( theAlgorithm )
-    {
-      case StretchToMinimumMaximum :
-        mContrastEnhancementFunction = new QgsLinearMinMaxEnhancement( mRasterDataType, mMinimumValue, mMaximumValue );
-        break;
-      case StretchAndClipToMinimumMaximum :
-        mContrastEnhancementFunction = new QgsLinearMinMaxEnhancementWithClip( mRasterDataType, mMinimumValue, mMaximumValue );
-        break;
-      case ClipToMinimumMaximum :
-        mContrastEnhancementFunction = new QgsClipToMinMaxEnhancement( mRasterDataType, mMinimumValue, mMaximumValue );
-        break;
-      case UserDefinedEnhancement :
-        //Do nothing
-        break;
-      default:
-        mContrastEnhancementFunction = new QgsContrastEnhancementFunction( mRasterDataType, mMinimumValue, mMaximumValue );
-        break;
-    }
+    case StretchToMinimumMaximum :
+      mContrastEnhancementFunction.reset( new QgsLinearMinMaxEnhancement( mRasterDataType, mMinimumValue, mMaximumValue ) );
+      break;
+    case StretchAndClipToMinimumMaximum :
+      mContrastEnhancementFunction.reset( new QgsLinearMinMaxEnhancementWithClip( mRasterDataType, mMinimumValue, mMaximumValue ) );
+      break;
+    case ClipToMinimumMaximum :
+      mContrastEnhancementFunction.reset( new QgsClipToMinMaxEnhancement( mRasterDataType, mMinimumValue, mMaximumValue ) );
+      break;
+    case UserDefinedEnhancement :
+      //Do nothing
+      break;
+    default:
+      mContrastEnhancementFunction.reset( new QgsContrastEnhancementFunction( mRasterDataType, mMinimumValue, mMaximumValue ) );
+      break;
+  }
 
-    mEnhancementDirty = true;
-    mContrastEnhancementAlgorithm = theAlgorithm;
+  mEnhancementDirty = true;
+  mContrastEnhancementAlgorithm = algorithm;
 
-    if ( generateTable )
-    {
-      generateLookupTable();
-    }
+  if ( generateTable )
+  {
+    generateLookupTable();
   }
 }
 
-/**
-    A public function that allows the user to set their own custom contrast enhancement function.
-
-    @param theFunction The new contrast enhancement function
-*/
-void QgsContrastEnhancement::setContrastEnhancementFunction( QgsContrastEnhancementFunction* theFunction )
+void QgsContrastEnhancement::setContrastEnhancementFunction( QgsContrastEnhancementFunction *function )
 {
-  QgsDebugMsg( "called" );
+  QgsDebugMsgLevel( QStringLiteral( "called" ), 4 );
 
-  if ( 0 != theFunction )
+  if ( function )
   {
-    mContrastEnhancementFunction = theFunction;
+    mContrastEnhancementFunction.reset( function );
     mContrastEnhancementAlgorithm = UserDefinedEnhancement;
     generateLookupTable();
   }
 }
 
-/**
-    Set the maximum value for the contrast enhancement. The second parameter is option an is for performace improvements. If you know you are immediately going to set the Minimum value or the contrast enhancement algorithm, you can elect to not generate the lookup tale. By default it will be generated.
-
-    @param theValue The new maximum value for the band
-    @param generateTable Flag to overide automatic look up table generation
-*/
-void QgsContrastEnhancement::setMaximumValue( double theValue, bool generateTable )
+void QgsContrastEnhancement::setMaximumValue( double value, bool generateTable )
 {
-  QgsDebugMsg( "called value: " + QString::number( theValue ) + " generate lookup table: " + QString::number(( int )generateTable ) );
+  QgsDebugMsgLevel( "called value: " + QString::number( value ) + " generate lookup table: " + QString::number( static_cast< int >( generateTable ) ), 4 );
 
-  if ( theValue > maximumValuePossible( mRasterDataType ) )
+  if ( value > maximumValuePossible( mRasterDataType ) )
   {
     mMaximumValue = maximumValuePossible( mRasterDataType );
   }
   else
   {
-    mMaximumValue = theValue;
+    mMaximumValue = value;
   }
 
-  if ( 0 != mContrastEnhancementFunction )
+  if ( mContrastEnhancementFunction )
   {
-    mContrastEnhancementFunction->setMaximumValue( theValue );
+    mContrastEnhancementFunction->setMaximumValue( value );
   }
 
   mEnhancementDirty = true;
@@ -351,28 +197,22 @@ void QgsContrastEnhancement::setMaximumValue( double theValue, bool generateTabl
   }
 }
 
-/**
-    Set the maximum value for the contrast enhancement. The second parameter is option an is for performace improvements. If you know you are immediately going to set the Maximum value or the contrast enhancement algorithm, you can elect to not generate the lookup tale. By default it will be generated.
-
-    @param theValue The new minimum value for the band
-    @param generateTable Flag to overide automatic look up table generation
-*/
-void QgsContrastEnhancement::setMinimumValue( double theValue, bool generateTable )
+void QgsContrastEnhancement::setMinimumValue( double value, bool generateTable )
 {
-  QgsDebugMsg( "called value: " + QString::number( theValue ) + " generate lookup table: " + QString::number(( int )generateTable ) );
+  QgsDebugMsgLevel( "called value: " + QString::number( value ) + " generate lookup table: " + QString::number( static_cast< int >( generateTable ) ), 4 );
 
-  if ( theValue < minimumValuePossible( mRasterDataType ) )
+  if ( value < minimumValuePossible( mRasterDataType ) )
   {
     mMinimumValue = minimumValuePossible( mRasterDataType );
   }
   else
   {
-    mMinimumValue = theValue;
+    mMinimumValue = value;
   }
 
-  if ( 0 != mContrastEnhancementFunction )
+  if ( mContrastEnhancementFunction )
   {
-    mContrastEnhancementFunction->setMinimumValue( theValue );
+    mContrastEnhancementFunction->setMinimumValue( value );
   }
 
   mEnhancementDirty = true;
@@ -383,62 +223,62 @@ void QgsContrastEnhancement::setMinimumValue( double theValue, bool generateTabl
   }
 }
 
-void QgsContrastEnhancement::writeXML( QDomDocument& doc, QDomElement& parentElem ) const
+void QgsContrastEnhancement::writeXml( QDomDocument &doc, QDomElement &parentElem ) const
 {
   //minimum value
-  QDomElement minElem = doc.createElement( "minValue" );
-  QDomText minText = doc.createTextNode( QString::number( mMinimumValue ) );
+  QDomElement minElem = doc.createElement( QStringLiteral( "minValue" ) );
+  QDomText minText = doc.createTextNode( QgsRasterBlock::printValue( mMinimumValue ) );
   minElem.appendChild( minText );
   parentElem.appendChild( minElem );
 
   //maximum value
-  QDomElement maxElem = doc.createElement( "maxValue" );
-  QDomText maxText = doc.createTextNode( QString::number( mMaximumValue ) );
+  QDomElement maxElem = doc.createElement( QStringLiteral( "maxValue" ) );
+  QDomText maxText = doc.createTextNode( QgsRasterBlock::printValue( mMaximumValue ) );
   maxElem.appendChild( maxText );
   parentElem.appendChild( maxElem );
 
   //algorithm
-  QDomElement algorithmElem = doc.createElement( "algorithm" );
+  QDomElement algorithmElem = doc.createElement( QStringLiteral( "algorithm" ) );
   QDomText algorithmText = doc.createTextNode( contrastEnhancementAlgorithmString( mContrastEnhancementAlgorithm ) );
   algorithmElem.appendChild( algorithmText );
   parentElem.appendChild( algorithmElem );
 }
 
-void QgsContrastEnhancement::readXML( const QDomElement& elem )
+void QgsContrastEnhancement::readXml( const QDomElement &elem )
 {
-  QDomElement minValueElem = elem.firstChildElement( "minValue" );
+  QDomElement minValueElem = elem.firstChildElement( QStringLiteral( "minValue" ) );
   if ( !minValueElem.isNull() )
   {
     mMinimumValue = minValueElem.text().toDouble();
   }
-  QDomElement maxValueElem = elem.firstChildElement( "maxValue" );
+  QDomElement maxValueElem = elem.firstChildElement( QStringLiteral( "maxValue" ) );
   if ( !maxValueElem.isNull() )
   {
     mMaximumValue = maxValueElem.text().toDouble();
   }
-  QDomElement algorithmElem = elem.firstChildElement( "algorithm" );
+  QDomElement algorithmElem = elem.firstChildElement( QStringLiteral( "algorithm" ) );
   if ( !algorithmElem.isNull() )
   {
     QString algorithmString = algorithmElem.text();
     ContrastEnhancementAlgorithm algorithm = NoEnhancement;
     // old version ( < 19 Apr 2013) was using enum directly -> for backward compatibility
-    if ( algorithmString == "0" )
+    if ( algorithmString == QLatin1String( "0" ) )
     {
       algorithm = NoEnhancement;
     }
-    else if ( algorithmString == "1" )
+    else if ( algorithmString == QLatin1String( "1" ) )
     {
       algorithm = StretchToMinimumMaximum;
     }
-    else if ( algorithmString == "2" )
+    else if ( algorithmString == QLatin1String( "2" ) )
     {
       algorithm = StretchAndClipToMinimumMaximum;
     }
-    else if ( algorithmString == "3" )
+    else if ( algorithmString == QLatin1String( "3" ) )
     {
       algorithm = ClipToMinimumMaximum;
     }
-    else if ( algorithmString == "4" )
+    else if ( algorithmString == QLatin1String( "4" ) )
     {
       algorithm = UserDefinedEnhancement;
     }
@@ -451,39 +291,88 @@ void QgsContrastEnhancement::readXML( const QDomElement& elem )
   }
 }
 
+void QgsContrastEnhancement::toSld( QDomDocument &doc, QDomElement &element ) const
+{
+  if ( doc.isNull() || element.isNull() )
+    return;
+
+  QString algName;
+  switch ( contrastEnhancementAlgorithm() )
+  {
+    case StretchToMinimumMaximum:
+      algName = QStringLiteral( "StretchToMinimumMaximum" );
+      break;
+    /* TODO: check if ClipToZero => StretchAndClipToMinimumMaximum
+     * because value outside min/max ar considered as NoData instead of 0 */
+    case StretchAndClipToMinimumMaximum:
+      algName = QStringLiteral( "ClipToMinimumMaximum" );
+      break;
+    case ClipToMinimumMaximum:
+      algName = QStringLiteral( "ClipToMinimumMaximum" );
+      break;
+    case NoEnhancement:
+      return;
+    case UserDefinedEnhancement:
+      algName = contrastEnhancementAlgorithmString( contrastEnhancementAlgorithm() );
+      QgsDebugMsg( QObject::tr( "No SLD1.0 conversion yet for stretch algorithm %1" ).arg( algName ) );
+      return;
+  }
+
+  // Only <Normalize> is supported
+  // minValue and maxValue are that values as set depending on "Min /Max value settings"
+  // parameters
+  QDomElement normalizeElem = doc.createElement( QStringLiteral( "sld:Normalize" ) );
+  element.appendChild( normalizeElem );
+
+  QDomElement vendorOptionAlgorithmElem = doc.createElement( QStringLiteral( "sld:VendorOption" ) );
+  vendorOptionAlgorithmElem.setAttribute( QStringLiteral( "name" ), QStringLiteral( "algorithm" ) );
+  vendorOptionAlgorithmElem.appendChild( doc.createTextNode( algName ) );
+  normalizeElem.appendChild( vendorOptionAlgorithmElem );
+
+  QDomElement vendorOptionMinValueElem = doc.createElement( QStringLiteral( "sld:VendorOption" ) );
+  vendorOptionMinValueElem.setAttribute( QStringLiteral( "name" ), QStringLiteral( "minValue" ) );
+  vendorOptionMinValueElem.appendChild( doc.createTextNode( QString::number( minimumValue() ) ) );
+  normalizeElem.appendChild( vendorOptionMinValueElem );
+
+  QDomElement vendorOptionMaxValueElem = doc.createElement( QStringLiteral( "sld:VendorOption" ) );
+  vendorOptionMaxValueElem.setAttribute( QStringLiteral( "name" ), QStringLiteral( "maxValue" ) );
+  vendorOptionMaxValueElem.appendChild( doc.createTextNode( QString::number( maximumValue() ) ) );
+  normalizeElem.appendChild( vendorOptionMaxValueElem );
+}
+
 QString QgsContrastEnhancement::contrastEnhancementAlgorithmString( ContrastEnhancementAlgorithm algorithm )
 {
   switch ( algorithm )
   {
     case NoEnhancement:
-      return "NoEnhancement";
+      return QStringLiteral( "NoEnhancement" );
     case StretchToMinimumMaximum:
-      return "StretchToMinimumMaximum";
+      return QStringLiteral( "StretchToMinimumMaximum" );
     case StretchAndClipToMinimumMaximum:
-      return "StretchAndClipToMinimumMaximum";
+      return QStringLiteral( "StretchAndClipToMinimumMaximum" );
     case ClipToMinimumMaximum:
-      return "ClipToMinimumMaximum";
+      return QStringLiteral( "ClipToMinimumMaximum" );
     case UserDefinedEnhancement:
-      return "UserDefinedEnhancement";
+      return QStringLiteral( "UserDefinedEnhancement" );
   }
-  return "NoEnhancement";
+  return QStringLiteral( "NoEnhancement" );
 }
 
-QgsContrastEnhancement::ContrastEnhancementAlgorithm QgsContrastEnhancement::contrastEnhancementAlgorithmFromString( const QString& contrastEnhancementString )
+QgsContrastEnhancement::ContrastEnhancementAlgorithm QgsContrastEnhancement::contrastEnhancementAlgorithmFromString( const QString &contrastEnhancementString )
 {
-  if ( contrastEnhancementString == "StretchToMinimumMaximum" )
+  if ( contrastEnhancementString == QLatin1String( "StretchToMinimumMaximum" ) )
   {
     return StretchToMinimumMaximum;
   }
-  else if ( contrastEnhancementString == "StretchAndClipToMinimumMaximum" )
+  else if ( contrastEnhancementString == QLatin1String( "StretchAndClipToMinimumMaximum" ) )
   {
     return StretchAndClipToMinimumMaximum;
   }
-  else if ( contrastEnhancementString == "ClipToMinimumMaximum" )
+  else if ( contrastEnhancementString == QLatin1String( "ClipToMinimumMaximum" ) )
   {
     return ClipToMinimumMaximum;
   }
-  else if ( contrastEnhancementString == "UserDefinedEnhancement" )
+  else if ( contrastEnhancementString == QLatin1String( "UserDefinedEnhancement" ) )
   {
     return UserDefinedEnhancement;
   }

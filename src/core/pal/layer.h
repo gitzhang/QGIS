@@ -27,40 +27,36 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
+#ifndef PAL_LAYER_H_
+#define PAL_LAYER_H_
 
-#ifndef _LAYER_H_
-#define _LAYER_H_
+#define SIP_NO_FILE
 
+
+#include "qgis_core.h"
+#include "pal.h" // for LineArrangementFlags enum
+#include "qgsgeos.h"
+#include "qgsgenericspatialindex.h"
+#include <QMutex>
+#include <QLinkedList>
+#include <QHash>
 #include <fstream>
 
-#include <pal/pal.h>
-#include <pal/palgeometry.h>
-
+class QgsLabelFeature;
 
 namespace pal
 {
 
-  template <class Type> class LinkedList;
-  template <class Type> class Cell;
-  template <typename Data> class HashTable;
-
-  template<class DATATYPE, class ELEMTYPE, int NUMDIMS, class ELEMTYPEREAL, int TMAXNODES, int TMINNODES> class RTree;
-
-  class Feature;
   class FeaturePart;
+
   class Pal;
-  class SimpleMutex;
   class LabelInfo;
 
   /**
-   * \brief A layer of spacial entites
-   *
-   * a layer is a bog of feature with some data which influence the labelling process
-   *
-   *  \author Maxence Laurent <maxence _dot_ laurent _at_ heig-vd _dot_ ch>
+   * \ingroup core
+   * \brief A set of features which influence the labeling process
+   * \class pal::Layer
+   * \note not available in Python bindings
    */
   class CORE_EXPORT Layer
   {
@@ -70,11 +66,8 @@ namespace pal
       friend class Problem;
 
       friend class LabelPosition;
-      friend bool extractFeatCallback( FeaturePart *ft_ptr, void *ctx );
-      friend void toSVGPath( int nbPoints, double *x, double *y, int dpi, Layer *layer, int type, char *uid, std::ostream &out, double scale, int xmin, int ymax, bool exportInfo, char *color );
 
     public:
-      enum LabelMode { LabelPerFeature, LabelPerFeaturePart };
       enum UpsideDownLabels
       {
         Upright, // upside-down labels (90 <= angle < 270) are shown upright
@@ -82,251 +75,294 @@ namespace pal
         ShowAll // show upside down for all labels, including dynamic ones
       };
 
-      bool getDisplayAll() const { return displayAll; }
-
-    protected:
-      char *name; /* unique */
-
-      /** list of feature parts */
-      LinkedList<FeaturePart*> *featureParts;
-
-      /** list of features - for deletion */
-      LinkedList<Feature*> *features;
-
-      Pal *pal;
-
-      double defaultPriority;
-
-      bool obstacle;
-      bool active;
-      bool toLabel;
-      bool displayAll;
-
-      Units label_unit;
-
-      double min_scale;
-      double max_scale;
-
-      /** optional flags used for some placement methods */
-      Arrangement arrangement;
-      unsigned long arrangementFlags;
-      LabelMode mode;
-      bool mergeLines;
-
-      UpsideDownLabels upsidedownLabels;
-
-      // indexes (spatial and id)
-      RTree<FeaturePart*, double, 2, double, 8, 4> *rtree;
-      HashTable<Feature*> *hashtable;
-
-      HashTable< LinkedList<FeaturePart*>* > * connectedHashtable;
-      LinkedList< char* >* connectedTexts;
-
-      SimpleMutex *modMutex;
-
       /**
        * \brief Create a new layer
        *
-       * @param lyrName layer's name
-       * @param min_scale bellow this scale: no labeling
-       * @param max_scale above this scale: no labeling
-       * @param arrangement Arrangement mode : how to place candidates
-       * @param label_unit Unit for labels sizes
-       * @param defaultPriority layer's prioriry (0 is the best, 1 the worst)
-       * @param obstacle 'true' will discourage other label to be placed above features of this layer
-       * @param active is the layer is active (currently displayed)
-       * @param toLabel the layer will be labeled whether toLablel is true
-       * @param pal pointer to the pal object
-       * @param displayAll if true, all features will be labelled even though overlaps occur
+       * \param provider Associated provider
+       * \param name Name of the layer (for stats, debugging - does not need to be unique)
+       * \param arrangement Arrangement mode : how to place candidates
+       * \param defaultPriority layer's prioriry (0 is the best, 1 the worst)
+       * \param active is the layer is active (currently displayed)
+       * \param toLabel the layer will be labeled whether toLablel is TRUE
+       * \param pal pointer to the pal object
+       * \param displayAll if TRUE, all features will be labelled even though overlaps occur
        *
        */
-      Layer( const char *lyrName, double min_scale, double max_scale, Arrangement arrangement, Units label_unit, double defaultPriority, bool obstacle, bool active, bool toLabel, Pal *pal, bool displayAll = false );
+      Layer( QgsAbstractLabelProvider *provider, const QString &name, QgsPalLayerSettings::Placement arrangement, double defaultPriority, bool active, bool toLabel, Pal *pal, bool displayAll = false );
 
-      /**
-       * \brief Delete the layer
-       */
       virtual ~Layer();
 
+      bool displayAll() const { return mDisplayAll; }
+
       /**
-       * \brief check if the scal is in the scale range min_scale -> max_scale
-       * @param scale the scale to check
+       * Returns the number of features in layer.
        */
-      bool isScaleValid( double scale );
+      int featureCount() { return mHashtable.size(); }
 
-      /** add newly creted feature part into r tree and to the list */
-      void addFeaturePart( FeaturePart* fpart, const char* labelText = NULL );
-
-    public:
       /**
-       * \brief get the number of features into layer
+       * Returns the maximum number of point label candidates to generate for features
+       * in this layer.
        */
-      int getNbFeatures();
+      std::size_t maximumPointLabelCandidates() const
+      {
+        // when an extreme number of features exist in the layer, we limit the number of candidates
+        // to avoid the engine processing endlessly...
+        const int size = mHashtable.size();
+        if ( size > 1000 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitPoint() > 0 ? std::min( mPal->globalCandidatesLimitPoint(), 4 ) : 4 );
+        else if ( size > 500 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitPoint() > 0 ? std::min( mPal->globalCandidatesLimitPoint(), 6 ) : 6 );
+        else if ( size > 200 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitPoint() > 0 ? std::min( mPal->globalCandidatesLimitPoint(), 8 ) : 8 );
+        else if ( size > 100 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitPoint() > 0 ? std::min( mPal->globalCandidatesLimitPoint(), 12 ) : 12 );
+        else
+          return static_cast< std::size_t >( std::max( mPal->globalCandidatesLimitPoint(), 0 ) );
+      }
 
       /**
-       * \brief get layer's name
+       * Returns the maximum number of line label candidates to generate for features
+       * in this layer.
        */
-      const char * getName();
-
+      std::size_t maximumLineLabelCandidates() const
+      {
+        // when an extreme number of features exist in the layer, we limit the number of candidates
+        // to avoid the engine processing endlessly...
+        const int size = mHashtable.size();
+        if ( size > 1000 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitLine() > 0 ? std::min( mPal->globalCandidatesLimitLine(), 5 ) : 5 );
+        else if ( size > 500 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitLine() > 0 ? std::min( mPal->globalCandidatesLimitLine(), 10 ) : 10 );
+        else if ( size > 200 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitLine() > 0 ? std::min( mPal->globalCandidatesLimitLine(), 20 ) : 20 );
+        else if ( size > 100 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitLine() > 0 ? std::min( mPal->globalCandidatesLimitLine(), 40 ) : 40 );
+        else
+          return static_cast< std::size_t >( std::max( mPal->globalCandidatesLimitLine(), 0 ) );
+      }
 
       /**
-       *  \brief get arrangement policy
+       * Returns the maximum number of polygon label candidates to generate for features
+       * in this layer.
        */
-      Arrangement getArrangement();
+      std::size_t maximumPolygonLabelCandidates() const
+      {
+        // when an extreme number of features exist in the layer, we limit the number of candidates
+        // to avoid the engine processing endlessly...
+        const int size = mHashtable.size();
+        if ( size > 1000 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitPolygon() > 0 ? std::min( mPal->globalCandidatesLimitPolygon(), 5 ) : 5 );
+        else if ( size > 500 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitPolygon() > 0 ? std::min( mPal->globalCandidatesLimitPolygon(), 15 ) : 15 );
+        else if ( size > 200 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitPolygon() > 0 ? std::min( mPal->globalCandidatesLimitPolygon(), 20 ) : 20 );
+        else if ( size > 100 )
+          return static_cast< std::size_t >( mPal->globalCandidatesLimitPolygon() > 0 ? std::min( mPal->globalCandidatesLimitPolygon(), 25 ) : 25 );
+        else
+          return static_cast< std::size_t >( std::max( mPal->globalCandidatesLimitPolygon(), 0 ) );
+      }
+
+      //! Returns pointer to the associated provider
+      QgsAbstractLabelProvider *provider() const { return mProvider; }
 
       /**
-       * \brief set arrangement policy
+       * Returns the layer's name.
+       */
+      QString name() const { return mName; }
+
+      /**
+       * Returns the layer's arrangement policy.
+       * \see setArrangement
+       */
+      QgsPalLayerSettings::Placement arrangement() const { return mArrangement; }
+
+      /**
+       * Returns TRUE if the layer has curved labels
+       */
+      bool isCurved() const { return mArrangement == QgsPalLayerSettings::Curved || mArrangement == QgsPalLayerSettings::PerimeterCurved; }
+
+      /**
+       * Sets the layer's arrangement policy.
+       * \param arrangement arrangement policy
+       * \see arrangement
+       */
+      void setArrangement( QgsPalLayerSettings::Placement arrangement ) { mArrangement = arrangement; }
+
+      /**
+       * \brief Sets whether the layer is currently active.
        *
-       * @param arrangement arrangement policy
-       */
-      void setArrangement( Arrangement arrangement );
-
-      unsigned long getArrangementFlags() const { return arrangementFlags; }
-      void setArrangementFlags( unsigned long flags ) { arrangementFlags = flags; }
-
-      /**
-       * \brief get units for label size
-       */
-      Units getLabelUnit();
-
-      /**
-       * \brief set unit for label size
+       * Active means "is currently displayed or used as obstacles". When a layer is
+       * deactivated then feature of this layer will not be used for either
+       * labeling or as obstacles.
        *
+       * \param active set to TRUE to make the layer active, or FALSE to deactivate the layer
+       * \see active
        */
-      void setLabelUnit( Units label_unit );
+      void setActive( bool active ) { mActive = active; }
 
       /**
-       * \brief activate or desactivate the layer
-       *
-       * active means "is currently display". When active is false
-       * feature of this layer will never be used (neither for
-       * labelling nor as obstacles)
-       *
-       * @param active turn the layer active (true) or inactive (false)
+       * Returns whether the layer is currently active.
+       * \see setActive
        */
-      void setActive( bool active );
+      bool active() const { return mActive; }
 
       /**
-       * \brief return the layer's activity status
+       * Sets whether the layer will be labeled.
+       * \note Layers are labelled if and only if labelLayer and active are TRUE
+       * \param toLabel set to FALSE disable labeling this layer
+       * \see labelLayer
+       * \see setActive
        */
-      bool isActive();
-
+      void setLabelLayer( bool toLabel ) { mLabelLayer = toLabel; }
 
       /**
-       * \brief tell pal whether the layer has to be labelled.
-       *
-       * The layer will be labelled if and only if toLabel and isActive were set to true
-       *
-       * @param toLabel set to false disable lbelling this layer
+       * Returns whether the layer will be labeled or not.
+       * \see setLabelLayer
        */
-      void setToLabel( bool toLabel );
-
+      bool labelLayer() const { return mLabelLayer; }
 
       /**
-       * \brief return if the layer will be labelled or not
+       * Returns the obstacle type, which controls how features within the layer
+       * act as obstacles for labels.
+       * \see setObstacleType
        */
-      bool isToLabel();
-
+      QgsLabelObstacleSettings::ObstacleType obstacleType() const { return mObstacleType; }
 
       /**
-       * \brief mark layer's features as obstacles
-       *
-       * Avoid putting labels over obstalces.
-       * isActive must also be true to consider feature as obstacles,
-       * otherwise they will be ignored
+       * Sets the obstacle type, which controls how features within the layer
+       * act as obstacles for labels.
+       * \param obstacleType new obstacle type
+       * \see obstacleType
        */
-      void setObstacle( bool obstacle );
+      void setObstacleType( QgsLabelObstacleSettings::ObstacleType obstacleType ) { mObstacleType = obstacleType; }
 
       /**
-       * \brief return the obstacle status
-       */
-      bool isObstacle();
-
-      /**
-       * \brief set the minimum valid scale, below this scale the layer will not be labelled
-       *
-       * Use -1 to disable
-       */
-      void setMinScale( double min_scale );
-
-      /**
-       * \brief return the minimum valid scale
-       */
-      double getMinScale();
-
-
-      /**
-       * \brief set the maximum valid scale, upon this scale the layer will not be labelled
-       *
-       * use -1 to disable
-       */
-      void setMaxScale( double max_scale );
-
-
-      /**
-       * \brief return the maximum valid scale
-       */
-      double getMaxScale();
-
-
-      /**
-       * \ brief set the layer priority
-       *
-       * The best priority is 0, the worst is 1
-       * Should be links with a slider in a nice gui
+       * Sets the layer's priority.
+       * \param priority layer priority, between 0 and 1. 0 corresponds to highest priority,
+       * 1 to lowest priority.
+       * \see priority
        */
       void setPriority( double priority );
 
+      /**
+       * Returns the layer's priority, between 0 and 1. 0 corresponds to highest priority,
+       * 1 to lowest priority.
+       * \see setPriority
+       */
+      double priority() const { return mDefaultPriority; }
 
       /**
-       * return the layer's priority
+       * Sets whether connected lines should be merged before labeling
+       * \param merge set to TRUE to merge connected lines
+       * \see mergeConnectedLines
        */
-      double getPriority();
-
-      void setLabelMode( LabelMode m ) { mode = m; }
-      LabelMode getLabelMode() const { return mode; }
-
-      void setMergeConnectedLines( bool m ) { mergeLines = m; }
-      bool getMergeConnectedLines() const { return mergeLines; }
-
-      void setUpsidedownLabels( UpsideDownLabels ud ) { upsidedownLabels = ud; }
-      UpsideDownLabels getUpsidedownLabels() const { return upsidedownLabels; }
+      void setMergeConnectedLines( bool merge ) { mMergeLines = merge; }
 
       /**
-       * \brief register a feature in the layer
-       *
-       * @param geom_id unique identifier
-       * @param label_x label width
-       * @param label_y label height
-       * @param userGeom user's geometry that implements the PalGeometry interface
-       * @param labelPosX x position of the label (in case of fixed label position)
-       * @param labelPosY y position of the label (in case of fixed label position)
-       * @param fixedPos true if a single fixed position for this label is needed
-       * @param angle fixed angle (in radians) to rotate the label
-       * @param fixedAngle whether to use provided fixed angle
-       * @param xQuadOffset move label to quadrant: left, don't move, right (-1, 0, 1)
-       * @param yQuadOffset move label to quadrant: down, don't move, up (-1, 0, 1)
-       * @param xOffset map unit (+/-) to x-offset the label
-       * @param yOffset map unit (+/-) to y-offset the label
-       * @param alwaysShow whether to skip priority and always show the label (causes overlapping)
-       *
-       * @throws PalException::FeatureExists
-       *
-       * @return true on success (i.e. valid geometry)
+       * Returns whether connected lines will be merged before labeling.
+       * \see setMergeConnectedLines
        */
-      bool registerFeature( const char *geom_id, PalGeometry *userGeom, double label_x = -1, double label_y = -1,
-                            const char* labelText = NULL, double labelPosX = 0.0, double labelPosY = 0.0,
-                            bool fixedPos = false, double angle = 0.0, bool fixedAngle = false,
-                            int xQuadOffset = 0, int yQuadOffset = 0, double xOffset = 0.0, double yOffset = 0.0,
-                            bool alwaysShow = false );
+      bool mergeConnectedLines() const { return mMergeLines; }
 
-      /** return pointer to feature or NULL if doesn't exist */
-      Feature* getFeature( const char* geom_id );
+      /**
+       * Sets how upside down labels will be handled within the layer.
+       * \param ud upside down label handling mode
+       * \see upsidedownLabels
+       */
+      void setUpsidedownLabels( UpsideDownLabels ud ) { mUpsidedownLabels = ud; }
 
-      /** join connected features with the same label text */
+      /**
+       * Returns how upside down labels are handled within the layer.
+       * \see setUpsidedownLabels
+       */
+      UpsideDownLabels upsidedownLabels() const { return mUpsidedownLabels; }
+
+      /**
+       * Sets whether labels placed at the centroid of features within the layer
+       * are forced to be placed inside the feature's geometry.
+       * \param forceInside set to TRUE to force centroid labels to be within the
+       * feature. If set to FALSE then the centroid may fall outside the feature.
+       * \see centroidInside
+       */
+      void setCentroidInside( bool forceInside ) { mCentroidInside = forceInside; }
+
+      /**
+       * Returns whether labels placed at the centroid of features within the layer
+       * are forced to be placed inside the feature's geometry.
+       * \see setCentroidInside
+       */
+      bool centroidInside() const { return mCentroidInside; }
+
+      /**
+       * Register a feature in the layer.
+       *
+       * Does not take ownership of the label feature (it is owned by its provider).
+       *
+       * \throws PalException::FeatureExists
+       *
+       * \returns TRUE on success (i.e. valid geometry)
+       */
+      bool registerFeature( QgsLabelFeature *label );
+
+      //! Join connected features with the same label text
       void joinConnectedFeatures();
+
+      /**
+       * Returns the connected feature ID for a label feature ID, which is unique for all features
+       * which have been joined as a result of joinConnectedFeatures()
+       * \returns connected feature ID, or -1 if feature was not joined
+       */
+      int connectedFeatureId( QgsFeatureId featureId ) const;
+
+      //! Chop layer features at the repeat distance
+      void chopFeaturesAtRepeatDistance();
+
+    protected:
+      QgsAbstractLabelProvider *mProvider; // not owned
+      QString mName;
+
+      //! List of feature parts
+      QLinkedList<FeaturePart *> mFeatureParts;
+
+      //! List of obstacle parts
+      QList<FeaturePart *> mObstacleParts;
+
+      std::vector< geos::unique_ptr > mGeosObstacleGeometries;
+
+      Pal *mPal = nullptr;
+
+      double mDefaultPriority;
+
+      QgsLabelObstacleSettings::ObstacleType mObstacleType = QgsLabelObstacleSettings::PolygonBoundary;
+      bool mActive;
+      bool mLabelLayer;
+      bool mDisplayAll;
+      bool mCentroidInside;
+
+      //! Optional flags used for some placement methods
+      QgsPalLayerSettings::Placement mArrangement;
+
+      bool mMergeLines;
+
+      UpsideDownLabels mUpsidedownLabels;
+
+      //! Lookup table of label features (owned by the label feature provider that created them)
+      QHash< QgsFeatureId, QgsLabelFeature *> mHashtable;
+
+      QHash< QString, QVector<FeaturePart *> > mConnectedHashtable;
+      QHash< QgsFeatureId, int > mConnectedFeaturesIds;
+
+      QMutex mMutex;
+
+      //! Add newly created feature part into r tree and to the list
+      void addFeaturePart( FeaturePart *fpart, const QString &labelText = QString() );
+
+      //! Add newly created obstacle part into r tree and to the list
+      void addObstaclePart( FeaturePart *fpart );
 
   };
 
 } // end namespace pal
+
 
 #endif

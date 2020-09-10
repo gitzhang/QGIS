@@ -18,26 +18,26 @@
 #include "qgsrasterrenderer.h"
 #include "qgsrastertransparency.h"
 
+#include "qgssymbollayerutils.h"
+
 #include <QCoreApplication>
 #include <QDomDocument>
 #include <QDomElement>
 #include <QImage>
 #include <QPainter>
 
-#define tr( sourceText ) QCoreApplication::translate ( "QgsRasterRenderer", sourceText )
-
-// Changing RGB components of NODATA_COLOR may break tests
+// See #9101 before any change of NODATA_COLOR!
 const QRgb QgsRasterRenderer::NODATA_COLOR = qRgba( 0, 0, 0, 0 );
 
-QgsRasterRenderer::QgsRasterRenderer( QgsRasterInterface* input, const QString& type )
-    : QgsRasterInterface( input )
-    , mType( type ), mOpacity( 1.0 ), mRasterTransparency( 0 )
-    , mAlphaBand( -1 ) //, mInvertColor( false )
+QgsRasterRenderer::QgsRasterRenderer( QgsRasterInterface *input, const QString &type )
+  : QgsRasterInterface( input )
+  , mType( type )
 {
 }
 
 QgsRasterRenderer::~QgsRasterRenderer()
 {
+  delete mRasterTransparency;
 }
 
 int QgsRasterRenderer::bandCount() const
@@ -49,18 +49,18 @@ int QgsRasterRenderer::bandCount() const
   return 0;
 }
 
-QGis::DataType QgsRasterRenderer::dataType( int bandNo ) const
+Qgis::DataType QgsRasterRenderer::dataType( int bandNo ) const
 {
-  QgsDebugMsg( "Entered" );
+  QgsDebugMsgLevel( QStringLiteral( "Entered" ), 4 );
 
-  if ( mOn ) return QGis::ARGB32_Premultiplied;
+  if ( mOn ) return Qgis::ARGB32_Premultiplied;
 
   if ( mInput ) return mInput->dataType( bandNo );
 
-  return QGis::UnknownDataType;
+  return Qgis::UnknownDataType;
 }
 
-bool QgsRasterRenderer::setInput( QgsRasterInterface* input )
+bool QgsRasterRenderer::setInput( QgsRasterInterface *input )
 {
   // Renderer can only work with numerical values in at least 1 band
   if ( !input ) return false;
@@ -74,7 +74,10 @@ bool QgsRasterRenderer::setInput( QgsRasterInterface* input )
 
   for ( int i = 1; i <= input->bandCount(); i++ )
   {
-    if ( !QgsRasterBlock::typeIsNumeric( input->dataType( i ) ) )
+    const Qgis::DataType bandType = input->dataType( i );
+    // we always allow unknown data types to connect - otherwise invalid layers cannot setup
+    // their original rendering pipe and this information is lost
+    if ( bandType != Qgis::UnknownDataType && !QgsRasterBlock::typeIsNumeric( bandType ) )
     {
       return false;
     }
@@ -83,7 +86,7 @@ bool QgsRasterRenderer::setInput( QgsRasterInterface* input )
   return true;
 }
 
-bool QgsRasterRenderer::usesTransparency( ) const
+bool QgsRasterRenderer::usesTransparency() const
 {
   if ( !mInput )
   {
@@ -92,188 +95,98 @@ bool QgsRasterRenderer::usesTransparency( ) const
   return ( mAlphaBand > 0 || ( mRasterTransparency && !mRasterTransparency->isEmpty() ) || !qgsDoubleNear( mOpacity, 1.0 ) );
 }
 
-void QgsRasterRenderer::setRasterTransparency( QgsRasterTransparency* t )
+void QgsRasterRenderer::setRasterTransparency( QgsRasterTransparency *t )
 {
   delete mRasterTransparency;
   mRasterTransparency = t;
 }
 
-void QgsRasterRenderer::_writeXML( QDomDocument& doc, QDomElement& rasterRendererElem ) const
+void QgsRasterRenderer::_writeXml( QDomDocument &doc, QDomElement &rasterRendererElem ) const
 {
   if ( rasterRendererElem.isNull() )
   {
     return;
   }
 
-  rasterRendererElem.setAttribute( "type", mType );
-  rasterRendererElem.setAttribute( "opacity", QString::number( mOpacity ) );
-  rasterRendererElem.setAttribute( "alphaBand", mAlphaBand );
+  rasterRendererElem.setAttribute( QStringLiteral( "type" ), mType );
+  rasterRendererElem.setAttribute( QStringLiteral( "opacity" ), QString::number( mOpacity ) );
+  rasterRendererElem.setAttribute( QStringLiteral( "alphaBand" ), mAlphaBand );
+  rasterRendererElem.setAttribute( QStringLiteral( "nodataColor" ), mNodataColor.isValid() ? QgsSymbolLayerUtils::encodeColor( mNodataColor ) : QString() );
 
   if ( mRasterTransparency )
   {
-    mRasterTransparency->writeXML( doc, rasterRendererElem );
+    mRasterTransparency->writeXml( doc, rasterRendererElem );
   }
+
+  QDomElement minMaxOriginElem = doc.createElement( QStringLiteral( "minMaxOrigin" ) );
+  mMinMaxOrigin.writeXml( doc, minMaxOriginElem );
+  rasterRendererElem.appendChild( minMaxOriginElem );
 }
 
-void QgsRasterRenderer::readXML( const QDomElement& rendererElem )
+QRgb QgsRasterRenderer::renderColorForNodataPixel() const
+{
+  if ( !mNodataColor.isValid() )
+    return NODATA_COLOR;
+  else
+    return mNodataColor.rgba();
+}
+
+void QgsRasterRenderer::readXml( const QDomElement &rendererElem )
 {
   if ( rendererElem.isNull() )
   {
     return;
   }
 
-  mType = rendererElem.attribute( "type" );
-  mOpacity = rendererElem.attribute( "opacity", "1.0" ).toDouble();
-  mAlphaBand = rendererElem.attribute( "alphaBand", "-1" ).toInt();
+  mType = rendererElem.attribute( QStringLiteral( "type" ) );
+  mOpacity = rendererElem.attribute( QStringLiteral( "opacity" ), QStringLiteral( "1.0" ) ).toDouble();
+  mAlphaBand = rendererElem.attribute( QStringLiteral( "alphaBand" ), QStringLiteral( "-1" ) ).toInt();
+  const QString colorEncoded = rendererElem.attribute( QStringLiteral( "nodataColor" ) );
+  mNodataColor = !colorEncoded.isEmpty() ? QgsSymbolLayerUtils::decodeColor( colorEncoded ) : QColor();
 
-  QDomElement rasterTransparencyElem = rendererElem.firstChildElement( "rasterTransparency" );
+  QDomElement rasterTransparencyElem = rendererElem.firstChildElement( QStringLiteral( "rasterTransparency" ) );
   if ( !rasterTransparencyElem.isNull() )
   {
     delete mRasterTransparency;
     mRasterTransparency = new QgsRasterTransparency();
-    mRasterTransparency->readXML( rasterTransparencyElem );
+    mRasterTransparency->readXml( rasterTransparencyElem );
+  }
+
+  QDomElement minMaxOriginElem = rendererElem.firstChildElement( QStringLiteral( "minMaxOrigin" ) );
+  if ( !minMaxOriginElem.isNull() )
+  {
+    mMinMaxOrigin.readXml( minMaxOriginElem );
   }
 }
 
-QString QgsRasterRenderer::minMaxOriginName( int theOrigin )
+void QgsRasterRenderer::copyCommonProperties( const QgsRasterRenderer *other, bool copyMinMaxOrigin )
 {
-  if ( theOrigin == MinMaxUnknown )
-  {
-    return "Unknown";
-  }
-  else if ( theOrigin == MinMaxUser )
-  {
-    return "User";
-  }
+  if ( !other )
+    return;
 
-  QString name;
-  if ( theOrigin & MinMaxMinMax )
-  {
-    name += "MinMax";
-  }
-  else if ( theOrigin & MinMaxCumulativeCut )
-  {
-    name += "CumulativeCut";
-  }
-  else if ( theOrigin & MinMaxStdDev )
-  {
-    name += "StdDev";
-  }
-
-  if ( theOrigin & MinMaxFullExtent )
-  {
-    name += "FullExtent";
-  }
-  else if ( theOrigin & MinMaxSubExtent )
-  {
-    name += "SubExtent";
-  }
-
-  if ( theOrigin & MinMaxEstimated )
-  {
-    name += "Estimated";
-  }
-  else if ( theOrigin & MinMaxExact )
-  {
-    name += "Exact";
-  }
-  return name;
+  setOpacity( other->opacity() );
+  setAlphaBand( other->alphaBand() );
+  setRasterTransparency( other->rasterTransparency() ? new QgsRasterTransparency( *other->rasterTransparency() ) : nullptr );
+  setNodataColor( other->nodataColor() );
+  if ( copyMinMaxOrigin )
+    setMinMaxOrigin( other->minMaxOrigin() );
 }
 
-QString QgsRasterRenderer::minMaxOriginLabel( int theOrigin )
+void QgsRasterRenderer::toSld( QDomDocument &doc, QDomElement &element, const QgsStringMap & ) const
 {
-  if ( theOrigin == MinMaxUnknown )
-  {
-    return tr( "Unknown" );
-  }
-  else if ( theOrigin == MinMaxUser )
-  {
-    return tr( "User defined" );
-  }
+  QDomElement rasterSymbolizerElem = doc.createElement( QStringLiteral( "sld:RasterSymbolizer" ) );
+  element.appendChild( rasterSymbolizerElem );
 
-  QString name;
-  if ( theOrigin & MinMaxEstimated )
+  // add opacity only is different from default
+  if ( !qgsDoubleNear( opacity(), 1.0 ) )
   {
-    name += tr( "Estimated" );
+    QDomElement opacityElem = doc.createElement( QStringLiteral( "sld:Opacity" ) );
+    opacityElem.appendChild( doc.createTextNode( QString::number( opacity() ) ) );
+    rasterSymbolizerElem.appendChild( opacityElem );
   }
-  else if ( theOrigin & MinMaxExact )
-  {
-    name += tr( "Exact" );
-  }
-
-  name += " ";
-
-  if ( theOrigin & MinMaxMinMax )
-  {
-    name += tr( "min / max" );
-  }
-  else if ( theOrigin & MinMaxCumulativeCut )
-  {
-    name += "cumulative cut";
-  }
-  else if ( theOrigin & MinMaxStdDev )
-  {
-    name += "standard deviation";
-  }
-
-  name += " " + tr( " of " ) + " ";
-
-  if ( theOrigin & MinMaxFullExtent )
-  {
-    name += "full extent";
-  }
-  else if ( theOrigin & MinMaxSubExtent )
-  {
-    name += "sub extent";
-  }
-
-  name += ".";
-
-  return name;
 }
 
-int QgsRasterRenderer::minMaxOriginFromName( QString theName )
+bool QgsRasterRenderer::accept( QgsStyleEntityVisitorInterface * ) const
 {
-  if ( theName.contains( "Unknown" ) )
-  {
-    return MinMaxUnknown;
-  }
-  else if ( theName.contains( "User" ) )
-  {
-    return MinMaxUser;
-  }
-
-  int origin = 0;
-
-  if ( theName.contains( "MinMax" ) )
-  {
-    origin |= MinMaxMinMax;
-  }
-  else if ( theName.contains( "CumulativeCut" ) )
-  {
-    origin |= MinMaxCumulativeCut;
-  }
-  else if ( theName.contains( "StdDev" ) )
-  {
-    origin |= MinMaxStdDev;
-  }
-
-  if ( theName.contains( "FullExtent" ) )
-  {
-    origin |= MinMaxFullExtent;
-  }
-  else if ( theName.contains( "SubExtent" ) )
-  {
-    origin |= MinMaxSubExtent;
-  }
-
-  if ( theName.contains( "Estimated" ) )
-  {
-    origin |= MinMaxEstimated;
-  }
-  else if ( theName.contains( "Exact" ) )
-  {
-    origin |= MinMaxExact;
-  }
-  return origin;
+  return true;
 }

@@ -22,35 +22,83 @@
 
 #include <QSqlQuery>
 
+#include "qgsoracleprovider.h"
 
+class QgsOracleConn;
 class QgsOracleProvider;
 
-class QgsOracleFeatureIterator : public QgsAbstractFeatureIterator
+
+class QgsOracleFeatureSource final: public QgsAbstractFeatureSource
 {
   public:
-    QgsOracleFeatureIterator( QgsOracleProvider *p, const QgsFeatureRequest &request );
-
-    ~QgsOracleFeatureIterator();
-
-    //! fetch next feature, return true on success
-    virtual bool nextFeature( QgsFeature& feature );
-
-    //! reset the iterator to the starting position
-    virtual bool rewind();
-
-    //! end of iterating: free the resources / lock
-    virtual bool close();
+    explicit QgsOracleFeatureSource( const QgsOracleProvider *p );
+    ~QgsOracleFeatureSource() override;
+    QgsFeatureIterator getFeatures( const QgsFeatureRequest &request ) override;
 
   protected:
-    QgsOracleProvider *P;
+    QgsDataSourceUri mUri;
+    QgsFields mFields;
 
-    bool openQuery( QString whereClause );
+    QString mGeometryColumn;          //!< Name of the geometry column
+    int mSrid;                        //!< Srid of column
+    bool mHasSpatialIndex;            //!< Has spatial index of geometry column
+    QgsWkbTypes::Type mDetectedGeomType;  //!< Geometry type detected in the database
+    QgsWkbTypes::Type mRequestedGeomType; //!< Geometry type requested in the uri
+    QString mSqlWhereClause;
+    QgsOraclePrimaryKeyType mPrimaryKeyType;
+    QList<int> mPrimaryKeyAttrs;
+    QString mQuery;
+    QgsCoordinateReferenceSystem mCrs;
 
-    bool getFeature( QgsFeature &feature );
+    std::shared_ptr<QgsOracleSharedData> mShared;
 
+    /* The transaction connection (if any) gets refed/unrefed when creating/
+     * destroying the QgsOracleFeatureSource, to ensure that the transaction
+     * connection remains valid during the life time of the feature source
+     * even if the QgsOracleFeatureSource object which initially created the
+     * connection has since been destroyed.
+    */
+    QgsOracleConn *mTransactionConnection = nullptr;
+
+
+    friend class QgsOracleFeatureIterator;
+    friend class QgsOracleExpressionCompiler;
+};
+
+
+class QgsOracleFeatureIterator final: public QgsAbstractFeatureIteratorFromSource<QgsOracleFeatureSource>
+{
+  public:
+    QgsOracleFeatureIterator( QgsOracleFeatureSource *source, bool ownSource, const QgsFeatureRequest &request );
+
+    ~QgsOracleFeatureIterator() override;
+
+    bool rewind() override;
+    bool close() override;
+
+  protected:
+    bool fetchFeature( QgsFeature &feature ) override;
+    bool nextFeatureFilterExpression( QgsFeature &f ) override;
+
+    bool openQuery( const QString &whereClause, const QVariantList &args, bool showLog = true );
+
+    bool execQuery( const QString &query, const QVariantList &args, int retryCount = 0 );
+
+    inline void lock();
+    inline void unlock();
+
+    QgsOracleConn *mConnection = nullptr;
     QSqlQuery mQry;
-    bool mRewind;
+    bool mRewind = false;
+    bool mExpressionCompiled = false;
+    bool mFetchGeometry = false;
     QgsAttributeList mAttributeList;
+    QString mSql;
+    QVariantList mArgs;
+
+    QgsCoordinateTransform mTransform;
+    QgsRectangle mFilterRect;
+    bool mIsTransactionConnection = false;
 };
 
 #endif // QGSORACLEFEATUREITERATOR_H

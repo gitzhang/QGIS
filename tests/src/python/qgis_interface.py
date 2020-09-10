@@ -18,16 +18,14 @@ Contact : ole.moller.nielsen@gmail.com
 
 __author__ = 'tim@linfiniti.com'
 __version__ = '0.5.0'
-__revision__ = '$Format:%H$'
 __date__ = '10/01/2011'
 __copyright__ = ('Copyright (c) 2010 by Ivan Mincik, ivan.mincik@gista.sk and '
                  'Copyright (c) 2011 German Carrillo, '
                  'geotux_tuxman@linuxmail.org')
 
-import qgis
-
-from PyQt4.QtCore import QObject
-from qgis.core import QgsMapLayerRegistry
+import qgis  # NOQA
+from qgis.PyQt.QtCore import QObject
+from qgis.core import QgsProject
 
 
 class QgisInterface(QObject):
@@ -68,7 +66,7 @@ class QgisInterface(QObject):
 
     def activeLayer(self):
         """Get pointer to the active layer (layer selected in the legend)"""
-        myLayers = QgsMapLayerRegistry.instance().mapLayers()
+        myLayers = QgsProject.instance().mapLayers()
         for myItem in myLayers:
             return myLayers[myItem]
 

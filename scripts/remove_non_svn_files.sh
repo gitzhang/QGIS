@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ###########################################################################
 #    remove_non_svn_files.sh
 #    ---------------------
 #    Date                 : August 2008
 #    Copyright            : (C) 2008 by Tim Sutton
-#    Email                : tim dot linfiniti at com
+#    Email                : tim at kartoza dot com
 ###########################################################################
 #                                                                         #
 #   This program is free software; you can redistribute it and/or modify  #
@@ -21,4 +21,4 @@
 # deleting each file.
 #
 
-for FILE in `svn status |grep ^? | awk '{print $2}'`;do rm -i -r $FILE; done
+for FILE in $(svn status |grep "^?" | awk '{print $2}');do rm -i -r $FILE; done

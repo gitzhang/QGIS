@@ -40,6 +40,7 @@ extern "C"
 #include "qgsgeometry.h"
 #include "qgsrectangle.h"
 #include "qgsconfig.h"
+#include "qgsunittypes.h"
 
 #include <QByteArray>
 #include <QFileDialog>
@@ -64,21 +65,13 @@ extern "C"
 }
 #endif
 
-#if !defined(GRASS_VERSION_MAJOR) || \
-    !defined(GRASS_VERSION_MINOR) || \
-    GRASS_VERSION_MAJOR<6 || \
-    (GRASS_VERSION_MAJOR == 6 && GRASS_VERSION_MINOR <= 2)
-#define G__setenv(name,value) G__setenv( ( char * ) (name), (char *) (value) )
-#endif
-
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
 
-
 QgsGrassGisLib *QgsGrassGisLib::_instance = 0;
 
-QgsGrassGisLib GRASS_LIB_EXPORT *QgsGrassGisLib::instance( )
+QgsGrassGisLib GRASS_LIB_EXPORT *QgsGrassGisLib::instance()
 {
   if ( _instance == 0 )
   {
@@ -107,7 +100,7 @@ QgsGrassGisLib::QgsGrassGisLib()
   QString libPath = gisBase + "\\lib\\libgrass_gis." + QString( GRASS_VERSION ) + ".dll";
 #else
   QString libPath = QString( GRASS_LIBRARY_GIS );
-  // Prefere GISBASE if set
+  // Prefer GISBASE if set
   if ( !gisBase.isEmpty() )
   {
     libPath = gisBase + "/lib/" + QFileInfo( libPath ).fileName();
@@ -124,7 +117,7 @@ QgsGrassGisLib::QgsGrassGisLib()
 
 int GRASS_LIB_EXPORT QgsGrassGisLib::errorRoutine( const char *msg, int fatal )
 {
-  Q_UNUSED( fatal );
+  Q_UNUSED( fatal )
   QgsDebugMsg( QString( "error_routine (fatal = %1): %2" ).arg( fatal ).arg( msg ) );
   // qFatal does core dump, useful for backtrace
   if ( fatal )
@@ -148,10 +141,10 @@ void QgsGrassGisLib::warning( QString msg )
   QgsLogger::warning( msg );
 }
 
-void * QgsGrassGisLib::resolve( const char * symbol )
+void *QgsGrassGisLib::resolve( const char *symbol )
 {
   QgsDebugMsgLevel( QString( "symbol = %1" ).arg( symbol ), 5 );
-  void * fn = mLibrary.resolve( symbol );
+  void *fn = mLibrary.resolve( symbol );
   if ( !fn )
   {
     fatal( "Cannot resolve symbol " + QString( symbol ) );
@@ -159,15 +152,15 @@ void * QgsGrassGisLib::resolve( const char * symbol )
   return fn;
 }
 
-int GRASS_LIB_EXPORT QgsGrassGisLib::G__gisinit( const char * version, const char * programName )
+int GRASS_LIB_EXPORT QgsGrassGisLib::G__gisinit( const char *version, const char *programName )
 {
-  Q_UNUSED( version );
+  Q_UNUSED( version )
   // We use this function also to init our fake lib
   QgsDebugMsg( QString( "version = %1 programName = %2" ).arg( version ).arg( programName ) );
 
   // Init providers path
   int argc = 1;
-  char **argv = new char*[1];
+  char **argv = new char *[1];
   argv[0] = qstrdup( programName );
 
 
@@ -205,10 +198,6 @@ int GRASS_LIB_EXPORT QgsGrassGisLib::G__gisinit( const char * version, const cha
 
   G_suppress_masking();
 
-#if GRASS_VERSION_MAJOR<6 || (GRASS_VERSION_MAJOR == 6 && GRASS_VERSION_MINOR <= 4)
-  G__init_null_patterns();
-#endif
-
   // Read projection if set
   //mCrs.createFromOgcWmsCrs( "EPSG:900913" );
   QString crsStr = getenv( "QGIS_GRASS_CRS" );
@@ -217,11 +206,11 @@ int GRASS_LIB_EXPORT QgsGrassGisLib::G__gisinit( const char * version, const cha
 
   if ( !crsStr.isEmpty() )
   {
-    if ( !mCrs.createFromProj4( crsStr ) )
+    if ( !mCrs.createFromProj( crsStr ) )
     {
       fatal( "Cannot create CRS from QGIS_GRASS_CRS: " + crsStr );
     }
-    //TODO: createFromProj4 used to save to the user database any new CRS
+    //TODO: createFromProj used to save to the user database any new CRS
     // this behavior was changed in order to separate creation and saving.
     // Not sure if it necessary to save it here, should be checked by someone
     // familiar with the code (should also give a more descriptive name to the generated CRS)
@@ -229,13 +218,13 @@ int GRASS_LIB_EXPORT QgsGrassGisLib::G__gisinit( const char * version, const cha
     {
       QString myName = QString( " * %1 (%2)" )
                        .arg( QObject::tr( "Generated CRS", "A CRS automatically generated from layer info get this prefix for description" ) )
-                       .arg( mCrs.toProj4() );
+                       .arg( mCrs.toProj() );
       mCrs.saveAsUserCRS( myName );
     }
   }
-  mDistanceArea.setSourceCrs( mCrs.srsid() );
+  mDistanceArea.setSourceCrs( mCrs );
 
-  // Read region fron environment variable
+  // Read region from environment variable
   // QGIS_GRASS_REGION=west,south,east,north,cols,rows
 #if 0
   QString regionStr = getenv( "QGIS_GRASS_REGION" );
@@ -268,7 +257,7 @@ int GRASS_LIB_EXPORT QgsGrassGisLib::G__gisinit( const char * version, const cha
   window.rows = rows;
   window.cols = cols;
 
-  char* err = G_adjust_Cell_head( &window, 1, 1 );
+  char *err = G_adjust_Cell_head( &window, 1, 1 );
   if ( err )
   {
     fatal( QString( err ) );
@@ -296,7 +285,7 @@ int GRASS_LIB_EXPORT QgsGrassGisLib::G__gisinit( const char * version, const cha
   return 0;
 }
 
-int GRASS_LIB_EXPORT G__gisinit( const char * version, const char * programName )
+int GRASS_LIB_EXPORT G__gisinit( const char *version, const char *programName )
 {
   return QgsGrassGisLib::instance()->G__gisinit( version, programName );
 }
@@ -304,8 +293,7 @@ int GRASS_LIB_EXPORT G__gisinit( const char * version, const char * programName 
 typedef int G_parser_type( int argc, char **argv );
 int GRASS_LIB_EXPORT G_parser( int argc, char **argv )
 {
-  QgsDebugMsg( "Entered" );
-  G_parser_type* fn = ( G_parser_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_parser" ) );
+  G_parser_type *fn = ( G_parser_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_parser" ) );
   int ret = fn( argc, argv );
 
   if ( ret == 0 ) // parsed OK
@@ -322,16 +310,14 @@ int GRASS_LIB_EXPORT G_parser( int argc, char **argv )
 typedef int G_set_error_routine_type( int ( * )( const char *, int ) );
 int GRASS_LIB_EXPORT G_set_error_routine( int ( *error_routine )( const char *, int ) )
 {
-  //QgsDebugMsg( "Entered" );
-  G_set_error_routine_type* fn = ( G_set_error_routine_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_set_error_routine" ) );
+  G_set_error_routine_type *fn = ( G_set_error_routine_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_set_error_routine" ) );
   return fn( error_routine );
 }
 
 typedef int G_warning_type( const char *, ... );
-int GRASS_LIB_EXPORT G_warning( const char * msg, ... )
+int GRASS_LIB_EXPORT G_warning( const char *msg, ... )
 {
-  QgsDebugMsg( "Entered" );
-  G_warning_type* fn = ( G_warning_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_warning" ) );
+  G_warning_type *fn = ( G_warning_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_warning" ) );
   va_list ap;
   va_start( ap, msg );
   int ret = fn( msg, ap );
@@ -340,9 +326,9 @@ int GRASS_LIB_EXPORT G_warning( const char * msg, ... )
 }
 
 typedef void G_important_message_type( const char *msg, ... );
-void GRASS_LIB_EXPORT G_important_message( const char * msg, ... )
+void GRASS_LIB_EXPORT G_important_message( const char *msg, ... )
 {
-  G_important_message_type* fn = ( G_important_message_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_important_message" ) );
+  G_important_message_type *fn = ( G_important_message_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_important_message" ) );
   va_list ap;
   va_start( ap, msg );
   fn( msg, ap );
@@ -351,9 +337,8 @@ void GRASS_LIB_EXPORT G_important_message( const char * msg, ... )
 
 // G_fatal_error is declared in gisdefs.h as int but noreturn
 //typedef int G_fatal_error_type( const char *, ... );
-int GRASS_LIB_EXPORT G_fatal_error( const char * msg, ... )
+int GRASS_LIB_EXPORT G_fatal_error( const char *msg, ... )
 {
-  QgsDebugMsg( "Entered" );
   //G_fatal_error_type* fn = ( G_fatal_error_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_fatal_error" ) );
   va_list ap;
   va_start( ap, msg );
@@ -370,7 +355,7 @@ int GRASS_LIB_EXPORT G_fatal_error( const char * msg, ... )
 typedef int G_snprintf_type( char *, size_t, const char *, ... );
 int GRASS_LIB_EXPORT G_snprintf( char *str, size_t size, const char *fmt, ... )
 {
-  G_snprintf_type* fn = ( G_snprintf_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_snprintf" ) );
+  G_snprintf_type *fn = ( G_snprintf_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_snprintf" ) );
   va_list ap;
   va_start( ap, fmt );
   int ret = fn( str, size, fmt, ap );
@@ -380,15 +365,15 @@ int GRASS_LIB_EXPORT G_snprintf( char *str, size_t size, const char *fmt, ... )
 
 int GRASS_LIB_EXPORT G_done_msg( const char *msg, ... )
 {
-  Q_UNUSED( msg );
+  Q_UNUSED( msg )
   // TODO
   return 0;
 }
 
-char GRASS_LIB_EXPORT *QgsGrassGisLib::G_find_cell2( const char * name, const char * mapset )
+char GRASS_LIB_EXPORT *QgsGrassGisLib::G_find_cell2( const char *name, const char *mapset )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   QgsDebugMsg( "name = " + QString( name ) );
 
   // G_find_cell2 is used by some modules to test if output exists (r.basins.fill)
@@ -399,34 +384,34 @@ char GRASS_LIB_EXPORT *QgsGrassGisLib::G_find_cell2( const char * name, const ch
     return 0;
   }
   QString ms = "qgis";
-  return qstrdup( ms.toAscii() );  // memory lost
+  return qstrdup( ms.toLatin1() );  // memory lost
 }
 
 char GRASS_LIB_EXPORT *G__file_name( char *path, const char *element, const char *name, const char *mapset )
 {
-  Q_UNUSED( path );
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  return NULL;
+  Q_UNUSED( path )
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  return nullptr;
 }
 
 char *G__file_name_misc( char *path, const char *dir, const char *element, const char *name, const char *mapset )
 {
-  Q_UNUSED( path );
-  Q_UNUSED( dir );
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  return NULL;
+  Q_UNUSED( path )
+  Q_UNUSED( dir )
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  return nullptr;
 }
 
-char GRASS_LIB_EXPORT *G_find_cell2( const char* name, const char *mapset )
+char GRASS_LIB_EXPORT *G_find_cell2( const char *name, const char *mapset )
 {
   return QgsGrassGisLib::instance()->G_find_cell2( name, mapset );
 }
 
-char GRASS_LIB_EXPORT *G_find_cell( char * name, const char * mapset )
+char GRASS_LIB_EXPORT *G_find_cell( char *name, const char *mapset )
 {
   // Not really sure about differences between G_find_cell and G_find_cell2
   return G_find_cell2( name, mapset );
@@ -434,36 +419,36 @@ char GRASS_LIB_EXPORT *G_find_cell( char * name, const char * mapset )
 
 char GRASS_LIB_EXPORT *G_find_file( const char *element, char *name, const char *mapset )
 {
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  return NULL;
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  return nullptr;
 }
 
 char GRASS_LIB_EXPORT *G_find_file2( const char *element, const char *name, const char *mapset )
 {
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  return NULL;
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  return nullptr;
 }
 
 char GRASS_LIB_EXPORT *G_find_file_misc( const char *dir, const char *element, char *name, const char *mapset )
 {
-  Q_UNUSED( dir );
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  return NULL;
+  Q_UNUSED( dir )
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  return nullptr;
 }
 
 char GRASS_LIB_EXPORT *G_find_file2_misc( const char *dir, const char *element, const char *name, const char *mapset )
 {
-  Q_UNUSED( dir );
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  return NULL;
+  Q_UNUSED( dir )
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  return nullptr;
 }
 
 QgsGrassGisLib::Raster QgsGrassGisLib::raster( QString name )
@@ -481,7 +466,7 @@ QgsGrassGisLib::Raster QgsGrassGisLib::raster( QString name )
 
   if ( name.contains( "provider=" ) ) // encoded uri
   {
-    QgsDataSourceURI uri;
+    QgsDataSourceUri uri;
     uri.setEncodedUri( name.toLocal8Bit() );
     if ( uri.hasParam( "band" ) )
     {
@@ -512,7 +497,7 @@ QgsGrassGisLib::Raster QgsGrassGisLib::raster( QString name )
   Raster raster;
   raster.name = name;
   raster.band = band;
-  raster.provider = ( QgsRasterDataProvider* )QgsProviderRegistry::instance()->provider( providerKey, dataSource );
+  raster.provider = ( QgsRasterDataProvider * )QgsProviderRegistry::instance()->provider( providerKey, dataSource );
   if ( !raster.provider || !raster.provider->isValid() )
   {
     // No fatal, it may be used to test file existence
@@ -527,8 +512,8 @@ QgsGrassGisLib::Raster QgsGrassGisLib::raster( QString name )
       fatal( "Band out of range" );
     }
 
-    QgsDebugMsg( QString( "mCrs valid = %1 = %2" ).arg( mCrs.isValid() ).arg( mCrs.toProj4() ) );
-    QgsDebugMsg( QString( "crs valid = %1 = %2" ).arg( raster.provider->crs().isValid() ).arg( raster.provider->crs().toProj4() ) );
+    QgsDebugMsg( QString( "mCrs valid = %1 = %2" ).arg( mCrs.isValid() ).arg( mCrs.toProj() ) );
+    QgsDebugMsg( QString( "crs valid = %1 = %2" ).arg( raster.provider->crs().isValid() ).arg( raster.provider->crs().toProj() ) );
     if ( mCrs.isValid() )
     {
       // GDAL provider loads data without CRS as EPSG:4326!!! Verify, it should give
@@ -554,7 +539,7 @@ QgsGrassGisLib::Raster QgsGrassGisLib::raster( QString name )
 
 int QgsGrassGisLib::G_open_cell_old( const char *name, const char *mapset )
 {
-  Q_UNUSED( mapset );
+  Q_UNUSED( mapset )
 
   Raster rast = raster( name );
   return rast.fd;
@@ -588,7 +573,7 @@ int G_unopen_cell( int fd )
 
 int QgsGrassGisLib::G_open_raster_new( const char *name, RASTER_MAP_TYPE wr_type )
 {
-  Q_UNUSED( wr_type );
+  Q_UNUSED( wr_type )
   QString providerKey = "gdal";
   QString dataSource = name;
 
@@ -598,7 +583,7 @@ int QgsGrassGisLib::G_open_raster_new( const char *name, RASTER_MAP_TYPE wr_type
 
   QString outputFormat = "GTiff";
   int nBands = 1;
-  QGis::DataType type = qgisRasterType( wr_type );
+  Qgis::DataType type = qgisRasterType( wr_type );
   QgsDebugMsg( QString( "type = %1" ).arg( type ) );
   double geoTransform[6];
   geoTransform[0] = mExtent.xMinimum();
@@ -617,7 +602,7 @@ int QgsGrassGisLib::G_open_raster_new( const char *name, RASTER_MAP_TYPE wr_type
 
   raster.band = 1;
   raster.noDataValue = noDataValueForGrassType( wr_type );
-  QgsDebugMsg( QString( "noDataValue = %1" ).arg(( int )raster.noDataValue ) );
+  QgsDebugMsg( QString( "noDataValue = %1" ).arg( static_cast<int>( raster.noDataValue ) ) );
   raster.provider->setNoDataValue( raster.band, raster.noDataValue );
 
   raster.fd = mRasters.size();
@@ -642,7 +627,7 @@ int GRASS_LIB_EXPORT G_open_fp_cell_new( const char *name )
 
 RASTER_MAP_TYPE QgsGrassGisLib::G_raster_map_type( const char *name, const char *mapset )
 {
-  Q_UNUSED( mapset );
+  Q_UNUSED( mapset )
   Raster rast = raster( name );
 
   return grassRasterType( rast.provider->dataType( rast.band ) );
@@ -674,13 +659,13 @@ int GRASS_LIB_EXPORT G_raster_map_is_fp( const char *name, const char *mapset )
 
 int QgsGrassGisLib::G_read_fp_range( const char *name, const char *mapset, struct FPRange *drange )
 {
-  Q_UNUSED( mapset );
+  Q_UNUSED( mapset )
   Raster rast = raster( name );
 
   // TODO (no solution): Problem: GRASS has precise min/max values available,
   // in QGIS we can calculate, but it would be slow, so we are using estimated
   // values, which may result in wrong output
-  // Hopefully the range is not crutial for most modules, but it is problem certanly
+  // Hopefully the range is not crucial for most modules, but it is problem certanly
   // for r.rescale .. more?
 
   // TODO: estimate only for  large rasters
@@ -707,14 +692,14 @@ int GRASS_LIB_EXPORT G_read_range( const char *name, const char *mapset, struct 
   struct FPRange drange;
   QgsGrassGisLib::instance()->G_read_fp_range( name, mapset, &drange );
   G_init_range( range );
-  G_update_range(( CELL ) floor( drange.min ), range );
-  G_update_range(( CELL ) ceil( drange.max ), range );
+  G_update_range( ( CELL ) floor( drange.min ), range );
+  G_update_range( ( CELL ) ceil( drange.max ), range );
   return 1;
 }
 
 int GRASS_LIB_EXPORT G_debug( int level, const char *msg, ... )
 {
-  Q_UNUSED( level );
+  Q_UNUSED( level )
   va_list ap;
   va_start( ap, msg );
   QString message = QString().vsprintf( msg, ap );
@@ -745,7 +730,7 @@ typedef int G_spawn_type( const char *command, ... );
 int GRASS_LIB_EXPORT G_spawn( const char *command, ... )
 {
   va_list ap;
-  G_spawn_type* fn = ( G_spawn_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_spawn" ) );
+  G_spawn_type *fn = ( G_spawn_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_spawn" ) );
   va_start( ap, command );
   int ret = fn( command, ap );
   va_end( ap );
@@ -756,7 +741,7 @@ typedef int G_spawn_ex_type( const char *command, ... );
 int GRASS_LIB_EXPORT G_spawn_ex( const char *command, ... )
 {
   va_list ap;
-  G_spawn_ex_type* fn = ( G_spawn_ex_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_spawn_ex" ) );
+  G_spawn_ex_type *fn = ( G_spawn_ex_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_spawn_ex" ) );
   va_start( ap, command );
   int ret = fn( command, ap );
   va_end( ap );
@@ -765,12 +750,12 @@ int GRASS_LIB_EXPORT G_spawn_ex( const char *command, ... )
 
 int GRASS_LIB_EXPORT G_set_quant_rules( int fd, struct Quant *q )
 {
-  Q_UNUSED( fd );
-  Q_UNUSED( q );
+  Q_UNUSED( fd )
+  Q_UNUSED( q )
   return 0;
 }
 
-int QgsGrassGisLib::readRasterRow( int fd, void * buf, int row, RASTER_MAP_TYPE data_type, bool noDataAsZero )
+int QgsGrassGisLib::readRasterRow( int fd, void *buf, int row, RASTER_MAP_TYPE data_type, bool noDataAsZero )
 {
   if ( row < 0 || row >= mRows )
   {
@@ -796,7 +781,7 @@ int QgsGrassGisLib::readRasterRow( int fd, void * buf, int row, RASTER_MAP_TYPE 
   QgsRasterBlock *block = raster.input->block( raster.band, blockRect, mColumns, 1 );
   if ( !block ) return -1;
 
-  QGis::DataType requestedType = qgisRasterType( data_type );
+  Qgis::DataType requestedType = qgisRasterType( data_type );
 
   //QgsDebugMsg( QString("data_type = %1").arg(data_type) );
   //QgsDebugMsg( QString("requestedType = %1").arg(requestedType) );
@@ -818,13 +803,13 @@ int QgsGrassGisLib::readRasterRow( int fd, void * buf, int row, RASTER_MAP_TYPE 
         switch ( data_type )
         {
           case CELL_TYPE:
-            G_zero(( char * ) &(( CELL * ) buf )[i], G_raster_size( data_type ) );
+            G_zero( ( char * ) & ( ( CELL * ) buf )[i], G_raster_size( data_type ) );
             break;
           case FCELL_TYPE:
-            G_zero(( char * ) &(( FCELL * ) buf )[i], G_raster_size( data_type ) );
+            G_zero( ( char * ) & ( ( FCELL * ) buf )[i], G_raster_size( data_type ) );
             break;
           case DCELL_TYPE:
-            G_zero(( char * ) &(( DCELL * ) buf )[i], G_raster_size( data_type ) );
+            G_zero( ( char * ) & ( ( DCELL * ) buf )[i], G_raster_size( data_type ) );
             break;
           default:
             break;
@@ -835,13 +820,13 @@ int QgsGrassGisLib::readRasterRow( int fd, void * buf, int row, RASTER_MAP_TYPE 
         switch ( data_type )
         {
           case CELL_TYPE:
-            G_set_c_null_value( &(( CELL * ) buf )[i], 1 );
+            G_set_c_null_value( &( ( CELL * ) buf )[i], 1 );
             break;
           case FCELL_TYPE:
-            G_set_f_null_value( &(( FCELL * ) buf )[i], 1 );
+            G_set_f_null_value( &( ( FCELL * ) buf )[i], 1 );
             break;
           case DCELL_TYPE:
-            G_set_d_null_value( &(( DCELL * ) buf )[i], 1 );
+            G_set_d_null_value( &( ( DCELL * ) buf )[i], 1 );
             break;
           default:
             break;
@@ -860,55 +845,55 @@ int QgsGrassGisLib::readRasterRow( int fd, void * buf, int row, RASTER_MAP_TYPE 
 
 }
 
-int GRASS_LIB_EXPORT G_get_raster_row( int fd, void * buf, int row, RASTER_MAP_TYPE data_type )
+int GRASS_LIB_EXPORT G_get_raster_row( int fd, void *buf, int row, RASTER_MAP_TYPE data_type )
 {
   bool noDataAsZero = false;
   return QgsGrassGisLib::instance()->readRasterRow( fd, buf, row, data_type, noDataAsZero );
 }
 
-int GRASS_LIB_EXPORT G_get_raster_row_nomask( int fd, void * buf, int row, RASTER_MAP_TYPE data_type )
+int GRASS_LIB_EXPORT G_get_raster_row_nomask( int fd, void *buf, int row, RASTER_MAP_TYPE data_type )
 {
   return G_get_raster_row( fd, buf, row, data_type );
 }
 
-int GRASS_LIB_EXPORT G_get_c_raster_row( int fd, CELL * buf, int row )
+int GRASS_LIB_EXPORT G_get_c_raster_row( int fd, CELL *buf, int row )
 {
-  return G_get_raster_row( fd, ( void* )buf, row, CELL_TYPE );
+  return G_get_raster_row( fd, ( void * )buf, row, CELL_TYPE );
 }
 
-int GRASS_LIB_EXPORT G_get_c_raster_row_nomask( int fd, CELL * buf, int row )
+int GRASS_LIB_EXPORT G_get_c_raster_row_nomask( int fd, CELL *buf, int row )
 {
   return G_get_raster_row_nomask( fd, buf, row, CELL_TYPE );
 }
 
-int GRASS_LIB_EXPORT G_get_f_raster_row( int fd, FCELL * buf, int row )
+int GRASS_LIB_EXPORT G_get_f_raster_row( int fd, FCELL *buf, int row )
 {
-  return G_get_raster_row( fd, ( void* )buf, row, FCELL_TYPE );
+  return G_get_raster_row( fd, ( void * )buf, row, FCELL_TYPE );
 }
 
-int GRASS_LIB_EXPORT G_get_f_raster_row_nomask( int fd, FCELL * buf, int row )
+int GRASS_LIB_EXPORT G_get_f_raster_row_nomask( int fd, FCELL *buf, int row )
 {
-  return G_get_raster_row_nomask( fd, ( void* )buf, row, FCELL_TYPE );
+  return G_get_raster_row_nomask( fd, ( void * )buf, row, FCELL_TYPE );
 }
 
-int GRASS_LIB_EXPORT G_get_d_raster_row( int fd, DCELL * buf, int row )
+int GRASS_LIB_EXPORT G_get_d_raster_row( int fd, DCELL *buf, int row )
 {
-  return G_get_raster_row( fd, ( void* )buf, row, DCELL_TYPE );
+  return G_get_raster_row( fd, ( void * )buf, row, DCELL_TYPE );
 }
 
-int GRASS_LIB_EXPORT G_get_d_raster_row_nomask( int fd, DCELL * buf, int row )
+int GRASS_LIB_EXPORT G_get_d_raster_row_nomask( int fd, DCELL *buf, int row )
 {
-  return G_get_raster_row_nomask( fd, ( void* )buf, row, DCELL_TYPE );
+  return G_get_raster_row_nomask( fd, ( void * )buf, row, DCELL_TYPE );
 }
 
 // reads null as zero
-int GRASS_LIB_EXPORT G_get_map_row( int fd, CELL * buf, int row )
+int GRASS_LIB_EXPORT G_get_map_row( int fd, CELL *buf, int row )
 {
   bool noDataAsZero = true;
-  return QgsGrassGisLib::instance()->readRasterRow( fd, ( void* )buf, row, CELL_TYPE, noDataAsZero );
+  return QgsGrassGisLib::instance()->readRasterRow( fd, ( void * )buf, row, CELL_TYPE, noDataAsZero );
 }
 
-int GRASS_LIB_EXPORT G_get_map_row_nomask( int fd, CELL * buf, int row )
+int GRASS_LIB_EXPORT G_get_map_row_nomask( int fd, CELL *buf, int row )
 {
   return G_get_map_row( fd, buf, row );
 }
@@ -940,7 +925,7 @@ int QgsGrassGisLib::putRasterRow( int fd, const void *buf, RASTER_MAP_TYPE data_
     return -1;
   }
 
-  QGis::DataType inputType = qgisRasterType( data_type );
+  Qgis::DataType inputType = qgisRasterType( data_type );
   //QgsDebugMsg( QString("data_type = %1").arg(data_type) );
   //QgsDebugMsg( QString("inputType = %1").arg(inputType) );
   //QgsDebugMsg( QString("provider->dataType = %1").arg( rast.provider->dataType( rast.band ) ) );
@@ -958,13 +943,13 @@ int QgsGrassGisLib::putRasterRow( int fd, const void *buf, RASTER_MAP_TYPE data_
     switch ( data_type )
     {
       case CELL_TYPE:
-        isNoData = G_is_c_null_value( &(( CELL * ) buf )[i] ) != 0;
+        isNoData = G_is_c_null_value( &( ( CELL * ) buf )[i] ) != 0;
         break;
       case FCELL_TYPE:
-        isNoData = G_is_f_null_value( &(( FCELL * ) buf )[i] ) != 0;
+        isNoData = G_is_f_null_value( &( ( FCELL * ) buf )[i] ) != 0;
         break;
       case DCELL_TYPE:
-        isNoData = G_is_d_null_value( &(( DCELL * ) buf )[i] ) != 0;
+        isNoData = G_is_d_null_value( &( ( DCELL * ) buf )[i] ) != 0;
         break;
       default:
         break;
@@ -989,26 +974,26 @@ int GRASS_LIB_EXPORT G_put_raster_row( int fd, const void *buf, RASTER_MAP_TYPE 
   return QgsGrassGisLib::instance()->putRasterRow( fd, buf, data_type );
 }
 
-int GRASS_LIB_EXPORT G_put_c_raster_row( int fd, const CELL * buf )
+int GRASS_LIB_EXPORT G_put_c_raster_row( int fd, const CELL *buf )
 {
   return QgsGrassGisLib::instance()->putRasterRow( fd, buf, CELL_TYPE );
 }
 
-int GRASS_LIB_EXPORT G_put_f_raster_row( int fd, const FCELL * buf )
+int GRASS_LIB_EXPORT G_put_f_raster_row( int fd, const FCELL *buf )
 {
   return QgsGrassGisLib::instance()->putRasterRow( fd, buf, FCELL_TYPE );
 }
 
-int GRASS_LIB_EXPORT G_put_d_raster_row( int fd, const DCELL * buf )
+int GRASS_LIB_EXPORT G_put_d_raster_row( int fd, const DCELL *buf )
 {
   return QgsGrassGisLib::instance()->putRasterRow( fd, buf, DCELL_TYPE );
 }
 
 int GRASS_LIB_EXPORT G_check_input_output_name( const char *input, const char *output, int error )
 {
-  Q_UNUSED( input );
-  Q_UNUSED( output );
-  Q_UNUSED( error );
+  Q_UNUSED( input )
+  Q_UNUSED( output )
+  Q_UNUSED( error )
   return 0;
 }
 
@@ -1038,7 +1023,7 @@ void QgsGrassGisLib::initCellHead( struct Cell_head *cellhd )
 
 int QgsGrassGisLib::G_get_cellhd( const char *name, const char *mapset, struct Cell_head *cellhd )
 {
-  Q_UNUSED( mapset );
+  Q_UNUSED( mapset )
   initCellHead( cellhd );
   Raster rast = raster( name );
 
@@ -1064,17 +1049,7 @@ int GRASS_LIB_EXPORT G_get_cellhd( const char *name, const char *mapset, struct 
 
 double QgsGrassGisLib::G_database_units_to_meters_factor( void )
 {
-  switch ( mCrs.mapUnits() )
-  {
-    case QGis::Meters:
-      return 1.;
-    case QGis::Feet:
-      return .3048;
-    case QGis::Degrees:
-      return 1.;
-    default:
-      return 0.;
-  }
+  return QgsUnitTypes::fromUnitToUnitFactor( mCrs.mapUnits(), QgsUnitTypes::DistanceMeters );
 }
 
 double QgsGrassGisLib::G_area_of_cell_at_row( int row )
@@ -1082,10 +1057,10 @@ double QgsGrassGisLib::G_area_of_cell_at_row( int row )
   double yMax = mExtent.yMaximum() - row * mYRes;
   double yMin = yMax - mYRes;
   QgsRectangle rect( mExtent.xMinimum(), yMin, mExtent.xMinimum() + mXRes, yMax );
-  QgsGeometry* geo = QgsGeometry::fromRect( rect );
+  QgsGeometry *geo = QgsGeometry::fromRect( rect );
   double area = mDistanceArea.measure( geo );
   delete geo;
-  if ( !mCrs.geographicFlag() )
+  if ( !mCrs.isGeographic() )
   {
     area *= qPow( G_database_units_to_meters_factor(), 2 );
   }
@@ -1099,17 +1074,17 @@ double GRASS_LIB_EXPORT G_area_of_cell_at_row( int row )
 
 double QgsGrassGisLib::G_area_of_polygon( const double *x, const double *y, int n )
 {
-  QgsPolyline polyline;
+  QgsPolylineXY polyline;
   for ( int i = 0; i < n; i++ )
   {
-    polyline.append( QgsPoint( x[i], y[i] ) );
+    polyline.append( QgsPointXY( x[i], y[i] ) );
   }
-  QgsPolygon polygon;
+  QgsPolygonXYpolygon;
   polygon.append( polyline );
-  QgsGeometry* geo = QgsGeometry::fromPolygon( polygon );
+  QgsGeometry *geo = QgsGeometry::fromPolygonXY( polygon );
   double area = mDistanceArea.measure( geo );
   delete geo;
-  if ( !mCrs.geographicFlag() )
+  if ( !mCrs.isGeographic() )
   {
     area *= qPow( G_database_units_to_meters_factor(), 2 );
   }
@@ -1129,7 +1104,7 @@ double GRASS_LIB_EXPORT G_database_units_to_meters_factor( void )
 int QgsGrassGisLib::beginCalculations( void )
 {
   if ( !mCrs.isValid() ) return 0;
-  if ( !mCrs.geographicFlag() ) return 1; // planimetric
+  if ( !mCrs.isGeographic() ) return 1; // planimetric
   return 2; // non-planimetric
 }
 
@@ -1145,8 +1120,8 @@ int GRASS_LIB_EXPORT G_begin_distance_calculations( void )
 
 int GRASS_LIB_EXPORT G_begin_geodesic_distance( double a, double e2 )
 {
-  Q_UNUSED( a );
-  Q_UNUSED( e2 );
+  Q_UNUSED( a )
+  Q_UNUSED( e2 )
   return 0; // nothing to do
 }
 
@@ -1160,8 +1135,8 @@ double QgsGrassGisLib::distance( double e1, double n1, double e2, double n2 )
 {
   // QgsDistanceArea states that results are in meters, but it does not
   // seem to be true,
-  double dist = mDistanceArea.measureLine( QgsPoint( e1, n1 ), QgsPoint( e2, n2 ) );
-  if ( !mCrs.geographicFlag() )
+  double dist = mDistanceArea.measureLine( QgsPointXY( e1, n1 ), QgsPointXY( e2, n2 ) );
+  if ( !mCrs.isGeographic() )
   {
     dist *= G_database_units_to_meters_factor();
   }
@@ -1183,7 +1158,7 @@ double GRASS_LIB_EXPORT G_geodesic_distance( double lon1, double lat1, double lo
 
 int GRASS_LIB_EXPORT G_legal_filename( const char *s )
 {
-  Q_UNUSED( s );
+  Q_UNUSED( s )
   return 1;
 }
 
@@ -1211,9 +1186,9 @@ int GRASS_LIB_EXPORT G_set_geodesic_distance_lat2( double lat2 )
 
 double QgsGrassGisLib::G_geodesic_distance_lon_to_lon( double lon1, double lon2 )
 {
-  double dist = mDistanceArea.measureLine( QgsPoint( lon1, mLat1 ), QgsPoint( lon2, mLat2 ) );
+  double dist = mDistanceArea.measureLine( QgsPointXY( lon1, mLat1 ), QgsPointXY( lon2, mLat2 ) );
   // TODO: not sure about this
-  if ( !mCrs.geographicFlag() )
+  if ( !mCrs.isGeographic() )
   {
     dist *= G_database_units_to_meters_factor();
   }
@@ -1238,46 +1213,46 @@ int GRASS_LIB_EXPORT G_get_ellipsoid_parameters( double *a, double *e2 )
   return QgsGrassGisLib::instance()->G_get_ellipsoid_parameters( a, e2 );
 }
 
-QGis::DataType QgsGrassGisLib::qgisRasterType( RASTER_MAP_TYPE grassType )
+Qgis::DataType QgsGrassGisLib::qgisRasterType( RASTER_MAP_TYPE grassType )
 {
   switch ( grassType )
   {
     case CELL_TYPE:
-      return QGis::Int32;
+      return Qgis::Int32;
       break;
     case FCELL_TYPE:
-      return QGis::Float32;
+      return Qgis::Float32;
       break;
     case DCELL_TYPE:
-      return QGis::Float64;
+      return Qgis::Float64;
       break;
     default:
       break;
   }
-  return QGis::UnknownDataType;
+  return Qgis::UnknownDataType;
 }
 
-RASTER_MAP_TYPE QgsGrassGisLib::grassRasterType( QGis::DataType qgisType )
+RASTER_MAP_TYPE QgsGrassGisLib::grassRasterType( Qgis::DataType qgisType )
 {
   switch ( qgisType )
   {
-    case QGis::Byte:
-    case QGis::UInt16:
-    case QGis::Int16:
-    case QGis::UInt32:
-    case QGis::Int32:
+    case Qgis::Byte:
+    case Qgis::UInt16:
+    case Qgis::Int16:
+    case Qgis::UInt32:
+    case Qgis::Int32:
       return CELL_TYPE;
-    case QGis::Float32:
+    case Qgis::Float32:
       return FCELL_TYPE;
-    case QGis::Float64:
+    case Qgis::Float64:
       return DCELL_TYPE;
-      // Not supported types:
-    case QGis::CInt16:
-    case QGis::CInt32:
-    case QGis::CFloat32:
-    case QGis::CFloat64:
-    case QGis::ARGB32:
-    case QGis::ARGB32_Premultiplied:
+    // Not supported types:
+    case Qgis::CInt16:
+    case Qgis::CInt32:
+    case Qgis::CFloat32:
+    case Qgis::CFloat64:
+    case Qgis::ARGB32:
+    case Qgis::ARGB32_Premultiplied:
     default:
       return -1;
   }
@@ -1306,14 +1281,14 @@ double QgsGrassGisLib::noDataValueForGrassType( RASTER_MAP_TYPE grassType )
 typedef int G_vasprintf_type( char **, const char *, va_list );
 int G_vasprintf( char **out, const char *fmt, va_list ap )
 {
-  G_vasprintf_type* fn = ( G_vasprintf_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_vasprintf" ) );
+  G_vasprintf_type *fn = ( G_vasprintf_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_vasprintf" ) );
   return fn( out, fmt, ap );
 }
 
 typedef int G_asprintf_type( char **, const char *, ... );
 int G_asprintf( char **out, const char *fmt, ... )
 {
-  G_asprintf_type* fn = ( G_asprintf_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_asprintf" ) );
+  G_asprintf_type *fn = ( G_asprintf_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_asprintf" ) );
   va_list ap;
   va_start( ap, fmt );
   int ret = fn( out, fmt, ap );
@@ -1324,7 +1299,7 @@ int G_asprintf( char **out, const char *fmt, ... )
 typedef int G_lookup_key_value_from_file_type( const char *, const char *, char [], int );
 int GRASS_LIB_EXPORT G_lookup_key_value_from_file( const char *file, const char *key, char value[], int n )
 {
-  G_lookup_key_value_from_file_type *fn = ( G_lookup_key_value_from_file_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_lookup_key_value_from_file" ) );
+  G_lookup_key_value_from_file_type *fn = ( G_lookup_key_value_from_file_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_lookup_key_value_from_file" ) );
   return fn( file, key, value, n );
 }
 
@@ -1332,13 +1307,13 @@ typedef int G_cell_stats_histo_eq_type( struct Cell_stats *, CELL, CELL, CELL, C
 
 int GRASS_LIB_EXPORT G_cell_stats_histo_eq( struct Cell_stats *statf, CELL min1, CELL max1, CELL min2, CELL max2, int zero, void ( *func )( CELL, CELL, CELL ) )
 {
-  G_cell_stats_histo_eq_type *fn = ( G_cell_stats_histo_eq_type* ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_cell_stats_histo_eq_type" ) );
+  G_cell_stats_histo_eq_type *fn = ( G_cell_stats_histo_eq_type * ) cast_to_fptr( QgsGrassGisLib::instance()->resolve( "G_cell_stats_histo_eq_type" ) );
   return fn( statf, min1, max1, min2, max2, zero, func );
 }
 
 int GRASS_LIB_EXPORT G__temp_element( char *element )
 {
-  Q_UNUSED( element );
+  Q_UNUSED( element )
   return 0;
 }
 
@@ -1347,7 +1322,7 @@ char GRASS_LIB_EXPORT *G_tempfile( void )
   QTemporaryFile file( "qgis-grass-temp.XXXXXX" );
   QString name = file.fileName();
   file.open();
-  return name.toAscii().data();
+  return name.toLatin1().data();
 }
 
 char GRASS_LIB_EXPORT *G_mapset( void )
@@ -1360,74 +1335,74 @@ char GRASS_LIB_EXPORT *G_location( void )
   return qstrdup( "qgis" );
 }
 
-int GRASS_LIB_EXPORT G__write_colors( FILE * fd, struct Colors *colors )
+int GRASS_LIB_EXPORT G__write_colors( FILE *fd, struct Colors *colors )
 {
-  Q_UNUSED( fd );
-  Q_UNUSED( colors );
+  Q_UNUSED( fd )
+  Q_UNUSED( colors )
   return 1; // OK
 }
 
 int GRASS_LIB_EXPORT G_write_colors( const char *name, const char *mapset, struct Colors *colors )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  Q_UNUSED( colors );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  Q_UNUSED( colors )
   return 1;
 }
 
 int GRASS_LIB_EXPORT G_quantize_fp_map_range( const char *name, const char *mapset, DCELL d_min, DCELL d_max, CELL min, CELL max )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  Q_UNUSED( d_min );
-  Q_UNUSED( d_max );
-  Q_UNUSED( min );
-  Q_UNUSED( max );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  Q_UNUSED( d_min )
+  Q_UNUSED( d_max )
+  Q_UNUSED( min )
+  Q_UNUSED( max )
   return 1;
 }
 
 int GRASS_LIB_EXPORT G_read_cats( const char *name, const char *mapset, struct Categories *pcats )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   G_init_raster_cats( "Cats", pcats );
   return 0;
 }
 
 int GRASS_LIB_EXPORT G_read_raster_cats( const char *name, const char *mapset, struct Categories *pcats )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   G_init_raster_cats( "Cats", pcats );
   return 0;
 }
 
 int GRASS_LIB_EXPORT G_write_cats( char *name, struct Categories *cats )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( cats );
+  Q_UNUSED( name )
+  Q_UNUSED( cats )
   return 1; // OK
 }
 
 int GRASS_LIB_EXPORT G_write_raster_cats( char *name, struct Categories *cats )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( cats );
+  Q_UNUSED( name )
+  Q_UNUSED( cats )
   return 1;
 }
 
 int GRASS_LIB_EXPORT G_short_history( const char *name, const char *type, struct History *hist )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( type );
-  Q_UNUSED( hist );
+  Q_UNUSED( name )
+  Q_UNUSED( type )
+  Q_UNUSED( hist )
   return 1;
 }
 
 int GRASS_LIB_EXPORT G_write_history( const char *name, struct History *hist )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( hist );
+  Q_UNUSED( name )
+  Q_UNUSED( hist )
   return 0;
 }
 
@@ -1438,94 +1413,94 @@ int GRASS_LIB_EXPORT G_maskfd( void )
 
 int GRASS_LIB_EXPORT G_command_history( struct History *hist )
 {
-  Q_UNUSED( hist );
+  Q_UNUSED( hist )
   return 0;
 }
 
 int GRASS_LIB_EXPORT G_set_cats_title( const char *title, struct Categories *pcats )
 {
-  Q_UNUSED( title );
-  Q_UNUSED( pcats );
+  Q_UNUSED( title )
+  Q_UNUSED( pcats )
   return 0;
 }
 
 int GRASS_LIB_EXPORT G_read_history( const char *name, const char *mapset, struct History *hist )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  Q_UNUSED( hist );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  Q_UNUSED( hist )
   return 0;
 }
 
 int GRASS_LIB_EXPORT G_read_colors( const char *name, const char *mapset, struct Colors *colors )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  Q_UNUSED( colors );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  Q_UNUSED( colors )
   return 1;
 }
 
 int GRASS_LIB_EXPORT G_make_aspect_fp_colors( struct Colors *colors, DCELL min, DCELL max )
 {
-  Q_UNUSED( colors );
-  Q_UNUSED( min );
-  Q_UNUSED( max );
+  Q_UNUSED( colors )
+  Q_UNUSED( min )
+  Q_UNUSED( max )
   return 1; // OK
 }
 
 int GRASS_LIB_EXPORT G_check_overwrite( int argc, char **argv )
 {
-  Q_UNUSED( argc );
-  Q_UNUSED( argv );
+  Q_UNUSED( argc )
+  Q_UNUSED( argv )
   return 1; // overwrite
 }
 
 char GRASS_LIB_EXPORT *G_fully_qualified_name( const char *name, const char *mapset )
 {
-  Q_UNUSED( mapset );
+  Q_UNUSED( mapset )
   return G_store( name );
 }
 
 char GRASS_LIB_EXPORT *G_ask_cell_new( const char *prompt, char *name )
 {
-  Q_UNUSED( prompt );
-  Q_UNUSED( name );
-  return NULL;
+  Q_UNUSED( prompt )
+  Q_UNUSED( name )
+  return nullptr;
 }
 
 char GRASS_LIB_EXPORT *G_ask_cell_old( const char *prompt, char *name )
 {
-  Q_UNUSED( prompt );
-  Q_UNUSED( name );
-  return NULL;
+  Q_UNUSED( prompt )
+  Q_UNUSED( name )
+  return nullptr;
 }
 
 int GRASS_LIB_EXPORT G_remove( const char *element, const char *name )
 {
-  Q_UNUSED( element );
-  Q_UNUSED( name );
+  Q_UNUSED( element )
+  Q_UNUSED( name )
   return -1; // error
 }
 
 int GRASS_LIB_EXPORT G_rename( const char *element, const char *oldname, const char *newname )
 {
-  Q_UNUSED( element );
-  Q_UNUSED( oldname );
-  Q_UNUSED( newname );
+  Q_UNUSED( element )
+  Q_UNUSED( oldname )
+  Q_UNUSED( newname )
   return -1; // error
 }
 
 char GRASS_LIB_EXPORT *G_get_cell_title( const char *name, const char *mapset )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   return qstrdup( "title" );
 }
 
 int GRASS_LIB_EXPORT G_put_cell_title( const char *name, const char *title )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( title );
+  Q_UNUSED( name )
+  Q_UNUSED( title )
   return 1; // OK
 }
 
@@ -1536,21 +1511,21 @@ int GRASS_LIB_EXPORT G_clear_screen( void )
 
 char GRASS_LIB_EXPORT *G_find_vector( char *name, const char *mapset )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   return qstrdup( "qgis" );
 }
 
 char GRASS_LIB_EXPORT *G_find_vector2( const char *name, const char *mapset )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   return qstrdup( "qgis" );
 }
 
 int GRASS_LIB_EXPORT G__make_mapset_element( const char *p_element )
 {
-  Q_UNUSED( p_element );
+  Q_UNUSED( p_element )
   return 1; // OK
 }
 
@@ -1561,71 +1536,71 @@ char GRASS_LIB_EXPORT *G_location_path( void )
 
 FILE GRASS_LIB_EXPORT *G_fopen_modify( const char *element, const char *name )
 {
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  return NULL;
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  return nullptr;
 }
 
 FILE GRASS_LIB_EXPORT *G_fopen_old( const char *element, const char *name, const char *mapset )
 {
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
-  return NULL;
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
+  return nullptr;
 }
 
 char GRASS_LIB_EXPORT *G_gisdbase( void )
 {
-  return NULL;
+  return nullptr;
 }
 
 int GRASS_LIB_EXPORT G__name_is_fully_qualified( const char *fullname, char *name, char *mapset )
 {
-  Q_UNUSED( fullname );
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( fullname )
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   return 1; // fully qualified
 }
 
 int GRASS_LIB_EXPORT G_open_new( const char *element, const char *name )
 {
-  Q_UNUSED( element );
-  Q_UNUSED( name );
+  Q_UNUSED( element )
+  Q_UNUSED( name )
   return -1; // cannot open
 }
 
 struct Key_Value GRASS_LIB_EXPORT *G_get_projinfo( void )
 {
-  return NULL;
+  return nullptr;
 }
 
 struct Key_Value GRASS_LIB_EXPORT *G_get_projunits( void )
 {
-  return NULL;
+  return nullptr;
 }
 
 int GRASS_LIB_EXPORT G_get_reclass( const char *name, const char *mapset, struct Reclass *reclass )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   reclass->min = 0;
   reclass->max = 0;
   reclass->num = 0;
-  reclass->table = NULL;
+  reclass->table = nullptr;
   return 1; // OK
 }
 
 CELL GRASS_LIB_EXPORT G_number_of_cats( const char *name, const char *mapset )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   return 0;
 }
 
 int GRASS_LIB_EXPORT G_round_fp_map( const char *name, const char *mapset )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   return -1; // error
 }
 
@@ -1636,39 +1611,39 @@ char GRASS_LIB_EXPORT *G_mask_info( void )
 
 int GRASS_LIB_EXPORT G_read_quant( const char *name, const char *mapset, struct Quant *quant )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( mapset );
+  Q_UNUSED( name )
+  Q_UNUSED( mapset )
   G_quant_init( quant );
   return 0; // does not exist
 }
 
 int GRASS_LIB_EXPORT G_write_fp_range( const char *name, const struct FPRange *range )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( range );
+  Q_UNUSED( name )
+  Q_UNUSED( range )
   return 0; // OK
 }
 
 int GRASS_LIB_EXPORT G_write_range( const char *name, const struct Range *range )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( range );
+  Q_UNUSED( name )
+  Q_UNUSED( range )
   return 0; // OK
 }
 
 int GRASS_LIB_EXPORT G_write_raster_units( const char *name, const char *str )
 {
-  Q_UNUSED( name );
-  Q_UNUSED( str );
+  Q_UNUSED( name )
+  Q_UNUSED( str )
   return 0; // OK
 }
 
 int GRASS_LIB_EXPORT G_open_update( const char *element, const char *name )
 {
-  // G_open_update is used in r.flow if parm.seg, but parm.seg doesnt seem
+  // G_open_update is used in r.flow if parm.seg, but parm.seg doesn't seem
   // to be set to 1
-  Q_UNUSED( element );
-  Q_UNUSED( name );
-  qFatal( "G_open_update not imlemented" );
+  Q_UNUSED( element )
+  Q_UNUSED( name )
+  qFatal( "G_open_update not implemented" );
   return -1; // Cannot open
 }

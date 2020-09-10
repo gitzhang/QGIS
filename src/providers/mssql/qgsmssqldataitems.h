@@ -21,57 +21,64 @@
 #define QGSMSSQLDATAITEMS_H
 
 #include "qgsdataitem.h"
+#include "qgsdataitemprovider.h"
+#include "qgsmssqltablemodel.h"
 
-#include "qgsmssqlsourceselect.h"
+class QgsMssqlGeomColumnTypeThread;
 
 class QgsMssqlRootItem;
 class QgsMssqlConnectionItem;
 class QgsMssqlSchemaItem;
 class QgsMssqlLayerItem;
 
-class QgsMssqlRootItem : public QgsDataCollectionItem
+class QgsMssqlRootItem : public QgsConnectionsRootItem
 {
     Q_OBJECT
   public:
-    QgsMssqlRootItem( QgsDataItem* parent, QString name, QString path );
-    ~QgsMssqlRootItem();
+    QgsMssqlRootItem( QgsDataItem *parent, const QString &name, const QString &path );
 
-    QVector<QgsDataItem*> createChildren();
+    QVector<QgsDataItem *> createChildren() override;
 
-    virtual QWidget * paramWidget();
+    QVariant sortKey() const override { return 4; }
 
-    virtual QList<QAction*> actions();
+#ifdef HAVE_GUI
+    QWidget *paramWidget() override;
+#endif
 
   public slots:
-    void connectionsChanged();
-    void newConnection();
+#ifdef HAVE_GUI
+    void onConnectionsChanged();
+#endif
 };
 
 class QgsMssqlConnectionItem : public QgsDataCollectionItem
 {
     Q_OBJECT
   public:
-    QgsMssqlConnectionItem( QgsDataItem* parent, QString name, QString path );
-    ~QgsMssqlConnectionItem();
+    QgsMssqlConnectionItem( QgsDataItem *parent, const QString &name, const QString &path );
+    ~QgsMssqlConnectionItem() override;
 
-    QVector<QgsDataItem*> createChildren();
-    virtual bool equal( const QgsDataItem *other );
-    virtual QList<QAction*> actions();
+    QVector<QgsDataItem *> createChildren() override;
+    bool equal( const QgsDataItem *other ) override;
 
-    virtual bool acceptDrop() { return true; }
-    virtual bool handleDrop( const QMimeData * data, Qt::DropAction action );
-    void refresh();
+    bool handleDrop( const QMimeData *data, const QString &toSchema );
 
-    QString connInfo() const { return mConnInfo; };
+    QString connInfo() const { return mConnInfo; }
+    bool allowGeometrylessTables() const { return mAllowGeometrylessTables; }
 
   signals:
-    void addGeometryColumn( QgsMssqlLayerProperty );
+    void addGeometryColumn( const QgsMssqlLayerProperty & );
 
   public slots:
-    void editConnection();
-    void deleteConnection();
+
+    void setAllowGeometrylessTables( const bool allow );
 
     void setLayerType( QgsMssqlLayerProperty layerProperty );
+
+    void refresh() override;
+
+  private slots:
+    void setAsPopulated();
 
   private:
     QString mConnInfo;
@@ -83,20 +90,26 @@ class QgsMssqlConnectionItem : public QgsDataCollectionItem
     bool mUseGeometryColumns;
     bool mUseEstimatedMetadata;
     bool mAllowGeometrylessTables;
+    QgsMssqlGeomColumnTypeThread *mColumnTypeThread = nullptr;
+
+    void readConnectionSettings();
+    void stop();
 };
 
-class QgsMssqlSchemaItem : public QgsDataCollectionItem
+class QgsMssqlSchemaItem : public QgsDatabaseSchemaItem
 {
     Q_OBJECT
   public:
-    QgsMssqlSchemaItem( QgsDataItem* parent, QString name, QString path );
-    ~QgsMssqlSchemaItem();
+    QgsMssqlSchemaItem( QgsDataItem *parent, const QString &name, const QString &path );
 
-    QVector<QgsDataItem*> createChildren();
+    QVector<QgsDataItem *> createChildren() override;
 
-    QgsMssqlLayerItem* addLayer( QgsMssqlLayerProperty layerProperty, bool refresh );
-    void refresh() {}; // do not refresh directly
-    void addLayers( QgsDataItem* newLayers );
+    QgsMssqlLayerItem *addLayer( const QgsMssqlLayerProperty &layerProperty, bool refresh );
+    void refresh() override; // do not refresh directly (call parent)
+    void addLayers( QgsDataItem *newLayers );
+
+  public:
+    bool layerCollection() const override;
 };
 
 class QgsMssqlLayerItem : public QgsLayerItem
@@ -104,16 +117,37 @@ class QgsMssqlLayerItem : public QgsLayerItem
     Q_OBJECT
 
   public:
-    QgsMssqlLayerItem( QgsDataItem* parent, QString name, QString path, QgsLayerItem::LayerType layerType, QgsMssqlLayerProperty layerProperties );
-    ~QgsMssqlLayerItem();
+    QgsMssqlLayerItem( QgsDataItem *parent, const QString &name, const QString &path, QgsLayerItem::LayerType layerType, const QgsMssqlLayerProperty &layerProperties );
 
     QString createUri();
 
-    QgsMssqlLayerItem* createClone();
-    bool Used;
+    QgsMssqlLayerItem *createClone();
+
+    bool disableInvalidGeometryHandling() const;
+
+    const QgsMssqlLayerProperty &layerInfo() const { return mLayerProperty; }
+
+    QVector<QgsDataItem *> createChildren() override;
 
   private:
     QgsMssqlLayerProperty mLayerProperty;
+    bool mDisableInvalidGeometryHandling = false;
+
+};
+
+
+
+//! Provider for GDAL root data item
+class QgsMssqlDataItemProvider : public QgsDataItemProvider
+{
+  public:
+    QString name() override;
+
+    QString dataProviderKey() const override;
+
+    int capabilities() const override;
+
+    QgsDataItem *createDataItem( const QString &pathIn, QgsDataItem *parentItem ) override;
 };
 
 #endif // QGSMSSQLDATAITEMS_H

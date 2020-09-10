@@ -18,8 +18,9 @@
 #define QGSNEWSPATIALITELAYERDIALOG_H
 
 #include "ui_qgsnewspatialitelayerdialogbase.h"
-#include "qgisgui.h"
-#include "qgscontexthelp.h"
+#include "qgsguiutils.h"
+#include "qgscoordinatereferencesystem.h"
+#include "qgshelp.h"
 
 #include "qgis.h"
 
@@ -27,43 +28,45 @@ extern "C"
 {
 #include <sqlite3.h>
 #include <spatialite.h>
+#include "qgis_app.h"
 }
 
-class QgsNewSpatialiteLayerDialog: public QDialog, private Ui::QgsNewSpatialiteLayerDialogBase
+class APP_EXPORT QgsNewSpatialiteLayerDialog: public QDialog, private Ui::QgsNewSpatialiteLayerDialogBase
 {
     Q_OBJECT
 
   public:
-    QgsNewSpatialiteLayerDialog( QWidget *parent = 0, Qt::WFlags fl = QgisGui::ModalDialogFlags );
-    ~QgsNewSpatialiteLayerDialog();
+    QgsNewSpatialiteLayerDialog( QWidget *parent = nullptr, Qt::WindowFlags fl = QgsGuiUtils::ModalDialogFlags, const QgsCoordinateReferenceSystem &defaultCrs = QgsCoordinateReferenceSystem() );
 
   protected slots:
-    void on_mAddAttributeButton_clicked();
-    void on_mRemoveAttributeButton_clicked();
-    void on_mTypeBox_currentIndexChanged( int index );
-    void on_pbnFindSRID_clicked();
-    void on_leLayerName_textChanged( QString text );
-    void on_toolButtonNewDatabase_clicked();
-    void nameChanged( QString );
+    void mAddAttributeButton_clicked();
+    void mRemoveAttributeButton_clicked();
+    void mGeometryTypeBox_currentIndexChanged( int index );
+    void mTypeBox_currentIndexChanged( int index );
+    void pbnFindSRID_clicked();
+    void nameChanged( const QString & );
     void selectionChanged();
+    void checkOk();
 
-    void on_buttonBox_helpRequested() { QgsContextHelp::run( metaObject()->className() ); }
-    void on_buttonBox_accepted();
-    void on_buttonBox_rejected();
+    void buttonBox_accepted();
+    void buttonBox_rejected();
 
   private:
-    /**Returns the selected geometry type*/
+    //! Returns the selected geometry type
     QString selectedType() const;
+    //! Returns the selected Z dimension and/or M measurement
+    QString selectedZM() const;
 
-    /** Create a new database */
+    //! Create a new database
     bool createDb();
 
     bool apply();
 
-    static QString quotedIdentifier( QString id );
-    static QString quotedValue( QString value );
+    void showHelp();
 
-    QPushButton *mOkButton;
+    static QString quotedIdentifier( QString id );
+
+    QPushButton *mOkButton = nullptr;
     QString mCrsId;
 };
 

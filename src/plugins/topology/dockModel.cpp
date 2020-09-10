@@ -3,7 +3,7 @@
   TOPOLogy checker
   -------------------
          date                 : May 2009
-         copyright            : Vita Cizek
+         copyright            : (C) 2009 by Vita Cizek
          email                : weetya (at) gmail.com
 
  ***************************************************************************
@@ -17,23 +17,24 @@
 
 #include "dockModel.h"
 #include "topolError.h"
+#include "qgsvectorlayer.h"
 
-DockModel::DockModel( ErrorList& theErrorList, QObject *parent = 0 ) : mErrorlist( theErrorList )
+DockModel::DockModel( ErrorList &errorList, QObject *parent = nullptr ) : mErrorlist( errorList )
 {
-  Q_UNUSED( parent );
+  Q_UNUSED( parent )
   mHeader << QObject::tr( "Error" ) << QObject::tr( "Layer" ) << QObject::tr( "Feature ID" );
 
 }
 
 int DockModel::rowCount( const QModelIndex &parent ) const
 {
-  Q_UNUSED( parent );
+  Q_UNUSED( parent )
   return mErrorlist.count();
 }
 
 int DockModel::columnCount( const QModelIndex &parent ) const
 {
-  Q_UNUSED( parent );
+  Q_UNUSED( parent )
   return 3;
 }
 
@@ -81,7 +82,7 @@ QVariant DockModel::data( const QModelIndex &index, int role ) const
       break;
     case 1:
       if ( !mErrorlist[row]->featurePairs().first().layer )
-        val = QString( "Unknown" );
+        val = QStringLiteral( "Unknown" );
       else
         val = mErrorlist[row]->featurePairs().first().layer->name();
       break;
@@ -104,9 +105,9 @@ QVariant DockModel::data( const QModelIndex &index, int role ) const
 
 bool DockModel::setData( const QModelIndex &index, const QVariant &value, int role )
 {
-  Q_UNUSED( index );
-  Q_UNUSED( value );
-  Q_UNUSED( role );
+  Q_UNUSED( index )
+  Q_UNUSED( value )
+  Q_UNUSED( role )
   return false;
 }
 
@@ -121,7 +122,8 @@ Qt::ItemFlags DockModel::flags( const QModelIndex &index ) const
 
 void DockModel::resetModel()
 {
-  reset();
+  beginResetModel();
+  endResetModel();
 }
 
 void DockModel::reload( const QModelIndex &index1, const QModelIndex &index2 )

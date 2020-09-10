@@ -3,7 +3,7 @@
      --------------------------------------
     Date                 : 12.2.2013
     Copyright            : (C) 2013 Matthias Kuhn
-    Email                : matthias dot kuhn at gmx dot ch
+    Email                : matthias at opengis dot ch
  ***************************************************************************
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -16,100 +16,122 @@
 #ifndef QGSCACHEDFEATUREITERATOR_H
 #define QGSCACHEDFEATUREITERATOR_H
 
+#include "qgis_core.h"
 #include "qgsfeature.h"
 #include "qgsfeatureiterator.h"
 
 class QgsVectorLayerCache;
 
 /**
- * @brief
+ * \ingroup core
+ * \brief
  * Delivers features from the cache
  *
  */
 class CORE_EXPORT QgsCachedFeatureIterator : public QgsAbstractFeatureIterator
 {
   public:
-    /**
-     * @brief
-     * This constructor creates a feature iterator, that delivers only cached information, based on the
-     * @link QgsFeatureIds @endlink. No request is made to the backend.
-     *
-     * @param vlCache          The vector layer cache to use
-     * @param featureRequest   The feature request to answer
-     * @param featureIds       The feature ids to return
-     */
-    QgsCachedFeatureIterator( QgsVectorLayerCache* vlCache, QgsFeatureRequest featureRequest, QgsFeatureIds featureIds );
 
     /**
-     * @brief
+     * This constructor creates a feature iterator, that delivers all cached features. No request is made to the backend.
      *
-     * @param f
-     * @return bool
+     * \param vlCache          The vector layer cache to use
+     * \param featureRequest   The feature request to answer
      */
-    virtual bool nextFeature( QgsFeature& f );
+    QgsCachedFeatureIterator( QgsVectorLayerCache *vlCache, const QgsFeatureRequest &featureRequest );
 
     /**
-     * @brief
+     * Rewind to the beginning of the iterator
      *
-     * @return bool
+     * \returns bool TRUE if the operation was OK
      */
-    virtual bool rewind();
+    bool rewind() override;
 
     /**
-     * @brief
+     * Close this iterator. No further features will be available.
      *
-     * @return bool
+     * \returns TRUE if successful
      */
-    virtual bool close();
+    bool close() override;
+
+    // QgsAbstractFeatureIterator interface
+  protected:
+
+    /**
+     * Implementation for fetching a feature.
+     *
+     * \param f      Will write to this feature
+     * \returns bool  TRUE if the operation was OK
+     *
+     * \see bool getFeature( QgsFeature& f )
+     */
+    bool fetchFeature( QgsFeature &f ) override;
+
+    /**
+     * We have a local special iterator for FilterFids, no need to run the generic.
+     *
+     * \param f      Will write to this feature
+     * \returns bool  TRUE if the operation was OK
+     */
+    bool nextFeatureFilterFids( QgsFeature &f ) override { return fetchFeature( f ); }
 
   private:
     QgsFeatureIds mFeatureIds;
-    QgsVectorLayerCache* mVectorLayerCache;
-    QgsFeatureIds::Iterator mFeatureIdIterator;
+    QgsVectorLayerCache *mVectorLayerCache = nullptr;
+    QgsFeatureIds::ConstIterator mFeatureIdIterator;
+    QgsCoordinateTransform mTransform;
+    QgsRectangle mFilterRect;
 };
 
 /**
- * @brief
+ * \ingroup core
+ * \brief
  * Uses another iterator as backend and writes features to the cache
  *
  */
 class CORE_EXPORT QgsCachedFeatureWriterIterator : public QgsAbstractFeatureIterator
 {
   public:
+
     /**
-     * @brief
      * This constructor creates a feature iterator, which queries the backend and caches retrieved features.
      *
-     * @param vlCache          The vector layer cache to use
-     * @param featureRequest   The feature request to answer
+     * \param vlCache          The vector layer cache to use
+     * \param featureRequest   The feature request to answer
      */
-    QgsCachedFeatureWriterIterator( QgsVectorLayerCache* vlCache, QgsFeatureRequest featureRequest );
+    QgsCachedFeatureWriterIterator( QgsVectorLayerCache *vlCache, const QgsFeatureRequest &featureRequest );
 
     /**
-     * @brief
+     * Rewind to the beginning of the iterator
      *
-     * @param f
-     * @return bool
+     * \returns bool TRUE if the operation was OK
      */
-    virtual bool nextFeature( QgsFeature& f );
+    bool rewind() override;
 
     /**
-     * @brief
+     * Close this iterator. No further features will be available.
      *
-     * @return bool
+     * \returns TRUE if successful
      */
-    virtual bool rewind();
+    bool close() override;
+
+  protected:
 
     /**
-     * @brief
+     * Implementation for fetching a feature.
      *
-     * @return bool
+     * \param f      Will write to this feature
+     * \returns bool  TRUE if the operation was OK
+     *
+     * \see bool getFeature( QgsFeature& f )
      */
-    virtual bool close();
+    bool fetchFeature( QgsFeature &f ) override;
 
   private:
     QgsFeatureIterator mFeatIt;
-    QgsVectorLayerCache* mVectorLayerCache;
+    QgsVectorLayerCache *mVectorLayerCache = nullptr;
     QgsFeatureIds mFids;
+    QgsCoordinateTransform mTransform;
+    QgsRectangle mFilterRect;
 };
 #endif // QGSCACHEDFEATUREITERATOR_H

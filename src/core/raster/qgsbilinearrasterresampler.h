@@ -19,20 +19,31 @@
 #define QGSBILINEARRASTERRESAMPLER_H
 
 #include "qgsrasterresampler.h"
+#include "qgis_sip.h"
+#include "qgis.h"
+
 #include <QColor>
 
-/** \ingroup core
+#include "qgis_core.h"
+
+/**
+ * \ingroup core
     Bilinear Raster Resampler
 */
-class CORE_EXPORT QgsBilinearRasterResampler: public QgsRasterResampler
+class CORE_EXPORT QgsBilinearRasterResampler: public QgsRasterResamplerV2
 {
   public:
-    QgsBilinearRasterResampler();
-    ~QgsBilinearRasterResampler();
 
-    void resample( const QImage& srcImage, QImage& dstImage );
-    QString type() const { return "bilinear"; }
-    QgsRasterResampler * clone() const;
+    /**
+     * Constructor for QgsBilinearRasterResampler.
+     */
+    QgsBilinearRasterResampler() = default;
+    Q_DECL_DEPRECATED void resample( const QImage &srcImage, QImage &dstImage ) override SIP_DEPRECATED;
+
+    QImage resampleV2( const QImage &source, const QSize &size ) override;
+    QString type() const override;
+    QgsBilinearRasterResampler *clone() const override SIP_FACTORY;
+    int tileBufferPixels() const override;
 };
 
 #endif // QGSBILINEARRASTERRESAMPLER_H

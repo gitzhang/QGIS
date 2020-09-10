@@ -1,25 +1,38 @@
-SET(OWS_SRCS 
-  qgsowsprovider.cpp 
-  qgsowsdataitems.cpp 
-)
-SET(OWS_MOC_HDRS  
-  qgsowsprovider.h 
-  qgsowsdataitems.h
+SET(OWS_SRCS
+  qgsowsprovider.cpp
+  qgsowsdataitems.cpp
 )
 
 INCLUDE_DIRECTORIES (
-  ../../core
-  ../../gui
-  ${CMAKE_CURRENT_BINARY_DIR}/../../ui
+  ${CMAKE_SOURCE_DIR}/src/core
+  ${CMAKE_SOURCE_DIR}/src/core/expression
+  ${CMAKE_SOURCE_DIR}/src/core/geometry
+  ${CMAKE_SOURCE_DIR}/src/core/auth
+  ${CMAKE_SOURCE_DIR}/src/core/metadata
+  ${CMAKE_SOURCE_DIR}/src/core/symbology
+  ${CMAKE_SOURCE_DIR}/src/gui
+  ${CMAKE_SOURCE_DIR}/src/gui/auth
+  ${CMAKE_SOURCE_DIR}/external
+  ${CMAKE_SOURCE_DIR}/external/nlohmann
+
+  ${CMAKE_BINARY_DIR}/src/core
+  ${CMAKE_BINARY_DIR}/src/gui
+  ${CMAKE_BINARY_DIR}/src/ui
+)
+INCLUDE_DIRECTORIES(SYSTEM
 )
 
-QT4_WRAP_CPP(OWS_MOC_SRCS ${OWS_MOC_HDRS})
-ADD_LIBRARY (owsprovider MODULE ${OWS_SRCS} ${OWS_MOC_SRCS})
+ADD_LIBRARY (owsprovider MODULE ${OWS_SRCS})
 
 TARGET_LINK_LIBRARIES (owsprovider
   qgis_core
-  qgis_gui
 )
+
+IF (WITH_GUI)
+  TARGET_LINK_LIBRARIES (owsprovider
+    qgis_gui
+  )
+ENDIF ()
 
 INSTALL(TARGETS owsprovider
   RUNTIME DESTINATION ${QGIS_PLUGIN_DIR}

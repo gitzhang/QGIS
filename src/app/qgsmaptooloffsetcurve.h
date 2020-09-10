@@ -18,65 +18,107 @@
 
 #include "qgsmaptooledit.h"
 #include "qgsgeometry.h"
-#include "qgssnapper.h"
+#include "qgis_app.h"
+#include "ui_qgsoffsetuserinputwidget.h"
+#include "qgspointlocator.h"
+#include "qgsfeature.h"
 
-class QgsVertexMarker;
-class QDoubleSpinBox;
+class QGridLayout;
+
+class QgsSnapIndicator;
+class QgsDoubleSpinBox;
 class QGraphicsProxyWidget;
+class QgsFeature;
 
-class QgsMapToolOffsetCurve: public QgsMapToolEdit
+class APP_EXPORT QgsOffsetUserWidget : public QWidget, private Ui::QgsOffsetUserInputBase
+{
+    Q_OBJECT
+
+  public:
+
+    explicit QgsOffsetUserWidget( QWidget *parent = nullptr );
+
+    void setOffset( double offset );
+    double offset();
+    QDoubleSpinBox *editor() const {return mOffsetSpinBox;}
+
+    void setPolygonMode( bool polygon );
+
+  signals:
+    void offsetChanged( double offset );
+    void offsetEditingFinished( double offset, const Qt::KeyboardModifiers &modifiers );
+    void offsetEditingCanceled();
+    void offsetConfigChanged();
+
+  protected:
+    bool eventFilter( QObject *obj, QEvent *ev ) override;
+};
+
+class APP_EXPORT QgsMapToolOffsetCurve: public QgsMapToolEdit
 {
     Q_OBJECT
   public:
-    QgsMapToolOffsetCurve( QgsMapCanvas* canvas );
-    ~QgsMapToolOffsetCurve();
+    QgsMapToolOffsetCurve( QgsMapCanvas *canvas );
+    ~QgsMapToolOffsetCurve() override;
 
-    void canvasPressEvent( QMouseEvent * e );
-    void canvasReleaseEvent( QMouseEvent * e );
-    void canvasMoveEvent( QMouseEvent * e );
+    void keyPressEvent( QKeyEvent *e ) override;
+    void canvasReleaseEvent( QgsMapMouseEvent *e ) override;
+    void canvasMoveEvent( QgsMapMouseEvent *e ) override;
 
   private slots:
-    /**Places curve offset to value entered in the spin box*/
-    void placeOffsetCurveToValue();
+    //! Places curve offset from the mouse position or from the value entered in the spin box
+    void updateGeometryAndRubberBand( double offset );
+
+    //! Apply the offset either from the spin box or from the mouse event
+    void applyOffset( double offset, Qt::KeyboardModifiers modifiers );
+
+    void cancel();
 
   private:
+    //! Rubberband that shows the position of the offset curve
+    QgsRubberBand *mRubberBand = nullptr;
+    //! Snapping indicators
+    std::unique_ptr<QgsSnapIndicator> mSnapIndicator;
 
-    /**Rubberband that shows the position of the offset curve*/
-    QgsRubberBand* mRubberBand;
-    /**Geometry to manipulate*/
-    QgsGeometry* mOriginalGeometry;
-    /**Geometry after manipulation*/
+    //! The layer being manipulated
+    QgsVectorLayer *mSourceLayer = nullptr;
+
+    //! Geometry to manipulate
+    QgsGeometry mOriginalGeometry;
+    //! Geometry being manipulated
+    QgsGeometry mManipulatedGeometry;
+    //! Geometry after manipulation
     QgsGeometry mModifiedGeometry;
-    /**ID of manipulated feature*/
-    QgsFeatureId mModifiedFeature;
-    /**Layer ID of source layer*/
-    QString mSourceLayerId;
-    /**Internal flag to distinguish move from click*/
-    bool mGeometryModified;
-    /**Embedded item widget for distance spinbox*/
-    QGraphicsProxyWidget* mDistanceItem;
-    /**Shows current distance value and allows numerical editing*/
-    QDoubleSpinBox* mDistanceSpinBox;
-    /**Marker to show the cursor was snapped to another location*/
-    QgsVertexMarker* mSnapVertexMarker;
-    /**Forces geometry copy (no modification of geometry in current layer)*/
-    bool mForceCopy;
-    bool mMultiPartGeometry;
+    //! ID of manipulated feature
+    QgsFeatureId mModifiedFeature = -1;
+    int mModifiedPart = -1;
+    int mModifiedRing = -1;
 
+    //! Internal flag to distinguish move from click
+    bool mGeometryModified = false;
+
+    //! Shows current distance value and allows numerical editing
+    QgsOffsetUserWidget *mUserInputWidget = nullptr;
+
+    //! Forces geometry copy (no modification of geometry in current layer)
+    bool mCtrlHeldOnFirstClick = false;
+
+    QgsFeature mSourceFeature;
+
+    double calculateOffset( const QgsPointXY &mapPoint );
+
+    void createUserInputWidget();
+    void deleteUserInputWidget();
+
+    void prepareGeometry( const QgsPointLocator::Match &match, QgsFeature &snappedFeature );
 
     void deleteRubberBandAndGeometry();
-    QgsGeometry* createOriginGeometry( QgsVectorLayer* vl, const QgsSnappingResult& sr, QgsFeature& snappedFeature );
-    void createDistanceItem();
-    void deleteDistanceItem();
-    void setOffsetForRubberBand( double offset, bool leftSide );
-    /**Creates a linestring from the polygon ring containing the snapped vertex. Caller takes ownership of the created object*/
-    QgsGeometry* linestringFromPolygon( QgsGeometry* featureGeom, int vertex );
-    /**Sets snapping with default vertex search tolerance to all layers (to vertex and segment)*/
-    void configureSnapper( QgsSnapper& s );
-    /**Returns a single line from a multiline (or does nothing if geometry is already a single line). Deletes the input geometry*/
-    QgsGeometry* convertToSingleLine( QgsGeometry* geom, int vertex, bool& isMulti );
-    /**Converts offset line back to a multiline if necessary*/
-    QgsGeometry* convertToMultiLine( QgsGeometry* geom );
+
+
+    //! Creates a linestring from the polygon ring containing the snapped vertex. Caller takes ownership of the created object
+    QgsGeometry linestringFromPolygon( const QgsGeometry &featureGeom, int vertex );
+    //! Returns a single line from a multiline (or does nothing if geometry is already a single line). Deletes the input geometry
+    QgsGeometry convertToSingleLine( const QgsGeometry &geom, int vertex );
 };
 
 #endif // QGSMAPTOOLOFFSETCURVE_H

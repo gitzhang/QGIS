@@ -17,14 +17,15 @@ email                : jef at norbit dot de
 
 #include "qgsoraclecolumntypethread.h"
 #include "qgslogger.h"
+#include "qgsoracleconnpool.h"
 
 #include <QMetaType>
 
-QgsOracleColumnTypeThread::QgsOracleColumnTypeThread( QString name, bool useEstimatedMetadata, bool allowGeometrylessTables )
-    : QThread()
-    , mName( name )
-    , mUseEstimatedMetadata( useEstimatedMetadata )
-    , mAllowGeometrylessTables( allowGeometrylessTables )
+QgsOracleColumnTypeThread::QgsOracleColumnTypeThread( const QString &name, const QString &limitToSchema, bool useEstimatedMetadata, bool allowGeometrylessTables )
+  : mName( name )
+  , mSchema( limitToSchema )
+  , mUseEstimatedMetadata( useEstimatedMetadata )
+  , mAllowGeometrylessTables( allowGeometrylessTables )
 {
   qRegisterMetaType<QgsOracleLayerProperty>( "QgsOracleLayerProperty" );
 }
@@ -36,19 +37,21 @@ void QgsOracleColumnTypeThread::stop()
 
 void QgsOracleColumnTypeThread::run()
 {
-  QgsDataSourceURI uri = QgsOracleConn::connUri( mName );
-  QgsOracleConn *conn = QgsOracleConn::connectDb( uri.connectionInfo() );
+  mStopped = false;
+
+  QString conninfo = QgsOracleConn::toPoolName( QgsOracleConn::connUri( mName ) );
+  QgsOracleConn *conn = QgsOracleConnPool::instance()->acquireConnection( conninfo );
   if ( !conn )
   {
-    QgsDebugMsg( "Connection failed - " + uri.connectionInfo() );
+    QgsDebugMsg( "Connection failed - " + conninfo );
+    mStopped = true;
     return;
   }
 
-  mStopped = false;
-
-  emit progressMessage( tr( "Retrieving tables of %1..." ).arg( mName ) );
+  emit progressMessage( tr( "Retrieving tables of %1…" ).arg( mName ) );
   QVector<QgsOracleLayerProperty> layerProperties;
   if ( !conn->supportedLayers( layerProperties,
+                               mSchema,
                                QgsOracleConn::geometryColumnsOnly( mName ),
                                QgsOracleConn::userTablesOnly( mName ),
                                mAllowGeometrylessTables ) ||
@@ -66,10 +69,10 @@ void QgsOracleColumnTypeThread::run()
     if ( !mStopped )
     {
       emit progress( i++, n );
-      emit progressMessage( tr( "Scanning column %1.%2.%3..." )
-                            .arg( layerProperty.ownerName )
-                            .arg( layerProperty.tableName )
-                            .arg( layerProperty.geometryColName ) );
+      emit progressMessage( tr( "Scanning column %1.%2.%3…" )
+                            .arg( layerProperty.ownerName,
+                                  layerProperty.tableName,
+                                  layerProperty.geometryColName ) );
       conn->retrieveLayerTypes( layerProperty, mUseEstimatedMetadata, QgsOracleConn::onlyExistingTypes( mName ) );
     }
 
@@ -83,8 +86,12 @@ void QgsOracleColumnTypeThread::run()
     emit setLayerType( layerProperty );
   }
 
+  // store the list for later use (cache)
+  if ( !mStopped )
+    mLayerProperties = layerProperties;
+
   emit progress( 0, 0 );
   emit progressMessage( tr( "Table retrieval finished." ) );
 
-  conn->disconnect();
+  QgsOracleConnPool::instance()->releaseConnection( conn );
 }

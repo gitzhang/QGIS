@@ -1,10 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ###########################################################################
 #    build_debian_package.sh
 #    ---------------------
 #    Date                 : July 2007
 #    Copyright            : (C) 2007 by Tim Sutton
-#    Email                : tim dot linfiniti at com
+#    Email                : tim at kartoza dot com
 ###########################################################################
 #                                                                         #
 #   This program is free software; you can redistribute it and/or modify  #
@@ -15,7 +15,7 @@
 ###########################################################################
 
 set -x
-if [ -d `pwd`/src ]
+if [ -d $(pwd)/src ]
 then
   #src exists so we are prolly in the right dir
   echo "good we are in  qgis checkout dir!"
@@ -24,9 +24,9 @@ else
   exit 1
 fi
 
-if [ -d `pwd`/debian ]
+if [ -d $(pwd)/debian ]
 then
-  cd debian
+  cd debian || exit
   svn update
   cd ..
 else

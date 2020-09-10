@@ -19,24 +19,26 @@
 #ifndef QGSPLUGINMETADATA_H
 #define QGSPLUGINMETADATA_H
 #include <QString>
+#include "qgis_app.h"
 class QgisPlugin;
+
 /**
 * \class QgsPluginMetadata
 * \brief Stores information about a loaded plugin, including a pointer to
 * the instantiated object. This allows the plugin manager to tell the plugin to
 * unload itself.
 */
-class QgsPluginMetadata
+class APP_EXPORT QgsPluginMetadata
 {
   public:
-    QgsPluginMetadata( QString _libraryPath, QString _name, QgisPlugin *_plugin );
-    QString name();
-    QString library();
+    QgsPluginMetadata( const QString &_libraryPath, const QString &_name, QgisPlugin *_plugin );
+    QString name() const;
+    QString library() const;
     QgisPlugin *plugin();
   private:
     QString m_name;
     QString libraryPath;
-    QgisPlugin *m_plugin;
+    QgisPlugin *m_plugin = nullptr;
 };
 #endif //QGSPLUGINMETADATA_H
 

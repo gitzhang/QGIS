@@ -15,35 +15,148 @@
  ***************************************************************************/
 
 #include "qgscolordialog.h"
+#include "qgscolorscheme.h"
+#include "qgscolorschemeregistry.h"
+#include "qgssymbollayerutils.h"
+#include "qgsapplication.h"
+#include "qgssettings.h"
+#include "qgsgui.h"
 
+#include <QPushButton>
+#include <QMenu>
+#include <QToolButton>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QDesktopWidget>
+#include <QMouseEvent>
+#include <QInputDialog>
 
-QgsColorDialog::QgsColorDialog()
+QgsColorDialog::QgsColorDialog( QWidget *parent, Qt::WindowFlags fl, const QColor &color )
+  : QDialog( parent, fl )
+  , mPreviousColor( color )
 {
-}
+  setupUi( this );
+  QgsGui::enableAutoGeometryRestore( this );
 
-QgsColorDialog::~QgsColorDialog()
-{
-}
+  connect( mButtonBox, &QDialogButtonBox::accepted, this, &QgsColorDialog::mButtonBox_accepted );
+  connect( mButtonBox, &QDialogButtonBox::rejected, this, &QgsColorDialog::mButtonBox_rejected );
+  connect( mButtonBox, &QDialogButtonBox::clicked, this, &QgsColorDialog::mButtonBox_clicked );
 
-QColor QgsColorDialog::getLiveColor( const QColor& initialColor, QObject* updateObject, const char* updateSlot,
-                                     QWidget* parent,
-                                     const QString& title,
-                                     QColorDialog::ColorDialogOptions options )
-{
-  QColor returnColor( initialColor );
-  QColorDialog* liveDialog = new QColorDialog( initialColor, parent );
-  liveDialog->setWindowTitle( title.isEmpty() ? tr( "Select Color" ) : title );
-  liveDialog->setOptions( options );
+  connect( mColorWidget, &QgsPanelWidget::panelAccepted, this, &QDialog::reject );
 
-  connect( liveDialog, SIGNAL( currentColorChanged( const QColor& ) ),
-           updateObject, updateSlot );
-
-  if ( liveDialog->exec() )
+  if ( mPreviousColor.isValid() )
   {
-    returnColor = liveDialog->currentColor();
+    QPushButton *resetButton = new QPushButton( tr( "Reset" ) );
+    mButtonBox->addButton( resetButton, QDialogButtonBox::ResetRole );
   }
-  delete liveDialog;
-  liveDialog = 0;
 
-  return returnColor;
+  if ( color.isValid() )
+  {
+    mColorWidget->setColor( color );
+    mColorWidget->setPreviousColor( color );
+  }
+
+  mColorWidget->setAllowOpacity( true );
+
+  connect( mColorWidget, &QgsCompoundColorWidget::currentColorChanged, this, &QgsColorDialog::currentColorChanged );
+  connect( this, &QDialog::rejected, this, &QgsColorDialog::discardColor );
+  connect( mButtonBox, &QDialogButtonBox::helpRequested, this, &QgsColorDialog::showHelp );
+}
+
+QColor QgsColorDialog::color() const
+{
+  return mColorWidget->color();
+}
+
+void QgsColorDialog::setTitle( const QString &title )
+{
+  setWindowTitle( title.isEmpty() ? tr( "Select Color" ) : title );
+}
+
+void QgsColorDialog::setAllowOpacity( const bool allowOpacity )
+{
+  mAllowOpacity = allowOpacity;
+  mColorWidget->setAllowOpacity( allowOpacity );
+}
+
+QColor QgsColorDialog::getColor( const QColor &initialColor, QWidget *parent, const QString &title, const bool allowOpacity )
+{
+  QString dialogTitle = title.isEmpty() ? tr( "Select Color" ) : title;
+
+  QgsSettings settings;
+  //using native color dialogs?
+  bool useNative = settings.value( QStringLiteral( "qgis/native_color_dialogs" ), false ).toBool();
+  if ( useNative )
+  {
+    return QColorDialog::getColor( initialColor, parent, dialogTitle, allowOpacity ? QColorDialog::ShowAlphaChannel : ( QColorDialog::ColorDialogOption )0 );
+  }
+  else
+  {
+    QgsColorDialog *dialog = new QgsColorDialog( parent, nullptr, initialColor );
+    dialog->setWindowTitle( dialogTitle );
+    dialog->setAllowOpacity( allowOpacity );
+
+    QColor result;
+    if ( dialog->exec() )
+    {
+      result = dialog->color();
+    }
+
+    if ( !parent )
+    {
+      delete dialog;
+    }
+    return result;
+  }
+}
+
+void QgsColorDialog::mButtonBox_accepted()
+{
+  accept();
+}
+
+void QgsColorDialog::mButtonBox_rejected()
+{
+  reject();
+}
+
+void QgsColorDialog::mButtonBox_clicked( QAbstractButton *button )
+{
+  if ( mButtonBox->buttonRole( button ) == QDialogButtonBox::ResetRole && mPreviousColor.isValid() )
+  {
+    setColor( mPreviousColor );
+  }
+}
+
+void QgsColorDialog::discardColor()
+{
+  mColorWidget->setDiscarded( true );
+}
+
+void QgsColorDialog::setColor( const QColor &color )
+{
+  if ( !color.isValid() )
+  {
+    return;
+  }
+
+  QColor fixedColor = QColor( color );
+  if ( !mAllowOpacity )
+  {
+    //alpha disallowed, so don't permit transparent colors
+    fixedColor.setAlpha( 255 );
+  }
+
+  mColorWidget->setColor( fixedColor );
+  emit currentColorChanged( fixedColor );
+}
+
+void QgsColorDialog::closeEvent( QCloseEvent *e )
+{
+  QDialog::closeEvent( e );
+}
+
+void QgsColorDialog::showHelp()
+{
+  QgsHelp::openHelp( QStringLiteral( "introduction/general_tools.html#color-selector" ) );
 }

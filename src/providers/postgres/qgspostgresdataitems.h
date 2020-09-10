@@ -18,83 +18,73 @@
 #include <QMainWindow>
 
 #include "qgsdataitem.h"
+#include "qgsdataitemprovider.h"
 
 #include "qgspostgresconn.h"
-#include "qgspgsourceselect.h"
 #include "qgsmimedatautils.h"
-#include "qgsvectorlayerimport.h"
+#include "qgsvectorlayerexporter.h"
+#include "qgswkbtypes.h"
 
 class QgsPGRootItem;
 class QgsPGConnectionItem;
 class QgsPGSchemaItem;
 class QgsPGLayerItem;
 
-class QgsPGRootItem : public QgsDataCollectionItem
+class QgsPGRootItem : public QgsConnectionsRootItem
 {
     Q_OBJECT
   public:
-    QgsPGRootItem( QgsDataItem* parent, QString name, QString path );
-    ~QgsPGRootItem();
+    QgsPGRootItem( QgsDataItem *parent, const QString &name, const QString &path );
 
-    QVector<QgsDataItem*> createChildren();
+    QVector<QgsDataItem *> createChildren() override;
 
-    virtual QWidget * paramWidget();
-
-    virtual QList<QAction*> actions();
+    QVariant sortKey() const override { return 3; }
 
     static QMainWindow *sMainWindow;
 
   public slots:
-    void connectionsChanged();
-    void newConnection();
+    void onConnectionsChanged();
 };
 
 class QgsPGConnectionItem : public QgsDataCollectionItem
 {
     Q_OBJECT
   public:
-    QgsPGConnectionItem( QgsDataItem* parent, QString name, QString path );
-    ~QgsPGConnectionItem();
+    QgsPGConnectionItem( QgsDataItem *parent, const QString &name, const QString &path );
 
-    QVector<QgsDataItem*> createChildren();
-    virtual bool equal( const QgsDataItem *other );
-    virtual QList<QAction*> actions();
+    QVector<QgsDataItem *> createChildren() override;
+    bool equal( const QgsDataItem *other ) override;
 
-    virtual bool acceptDrop() { return true; }
-    virtual bool handleDrop( const QMimeData * data, Qt::DropAction action );
-
-    void refresh();
+    bool handleDrop( const QMimeData *data, const QString &toSchema );
 
   signals:
-    void addGeometryColumn( QgsPostgresLayerProperty );
+    void addGeometryColumn( const QgsPostgresLayerProperty & );
 
   public slots:
-    void editConnection();
-    void deleteConnection();
-    void refreshConnection();
 
-    void setLayerType( QgsPostgresLayerProperty layerProperty );
+    // refresh specified schema or all schemas if schema name is empty
+    void refreshSchema( const QString &schema );
 
-    void threadStarted();
-    void threadFinished();
-
-  private:
-    void stop();
-    QgsPostgresConn *mConn;
-    QMap<QString, QgsPGSchemaItem * > mSchemaMap;
-    QgsGeomColumnTypeThread *mColumnTypeThread;
 };
 
-class QgsPGSchemaItem : public QgsDataCollectionItem
+class QgsPGSchemaItem : public QgsDatabaseSchemaItem
 {
     Q_OBJECT
   public:
-    QgsPGSchemaItem( QgsDataItem* parent, QString name, QString path );
-    ~QgsPGSchemaItem();
+    QgsPGSchemaItem( QgsDataItem *parent, const QString &connectionName, const QString &name, const QString &path );
 
-    QVector<QgsDataItem*> createChildren();
+    QVector<QgsDataItem *> createChildren() override;
 
-    void addLayer( QgsPostgresLayerProperty layerProperty );
+    QString connectionName() const { return mConnectionName; }
+
+  private:
+    QgsPGLayerItem *createLayer( QgsPostgresLayerProperty layerProperty );
+
+    QString mConnectionName;
+
+    // QgsDataItem interface
+  public:
+    bool layerCollection() const override;
 };
 
 class QgsPGLayerItem : public QgsLayerItem
@@ -102,18 +92,34 @@ class QgsPGLayerItem : public QgsLayerItem
     Q_OBJECT
 
   public:
-    QgsPGLayerItem( QgsDataItem* parent, QString name, QString path, QgsLayerItem::LayerType layerType, QgsPostgresLayerProperty layerProperties );
-    ~QgsPGLayerItem();
+    QgsPGLayerItem( QgsDataItem *parent, const QString &name, const QString &path, QgsLayerItem::LayerType layerType, const QgsPostgresLayerProperty &layerProperties );
 
     QString createUri();
 
-    virtual QList<QAction*> actions();
+    QString comments() const override;
 
-  public slots:
-    void deleteLayer();
+    const QgsPostgresLayerProperty &layerInfo() const { return mLayerProperty; }
+
+    QVector<QgsDataItem *> createChildren() override;
 
   private:
     QgsPostgresLayerProperty mLayerProperty;
+
+};
+
+
+
+//! Provider for Postgres data item
+class QgsPostgresDataItemProvider : public QgsDataItemProvider
+{
+  public:
+    QString name() override;
+
+    QString dataProviderKey() const override;
+
+    int capabilities() const override;
+
+    QgsDataItem *createDataItem( const QString &pathIn, QgsDataItem *parentItem ) override;
 };
 
 #endif // QGSPOSTGRESDATAITEMS_H

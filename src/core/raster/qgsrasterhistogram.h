@@ -18,12 +18,15 @@
 #ifndef QGSRASTERHISTOGRAM
 #define QGSRASTERHISTOGRAM
 
+#include "qgis_core.h"
+#include "qgsrectangle.h"
 #include <QString>
 #include <QVector>
 
 #include <limits>
 
-/** \ingroup core
+/**
+ * \ingroup core
  * The QgsRasterHistogram is a container for histogram of a single raster band.
  * It is used to cache computed histograms in raster providers.
  */
@@ -32,65 +35,57 @@ class CORE_EXPORT QgsRasterHistogram
   public:
     typedef QVector<int> HistogramVector;
 
-    QgsRasterHistogram()
-    {
-      bandNumber = 0;
-      binCount = 0;
-      nonNullCount = 0;
-      includeOutOfRange = false;
-      maximum = 0;
-      minimum = 0;
-      width = 0;
-      height = 0;
-      valid = false;
-    }
+    /**
+     * Constructor for an invalid QgsRasterHistogram.
+     */
+    QgsRasterHistogram() = default;
 
-    /*! Compares region, size etc. not histogram itself */
+    //! Compares region, size etc. not histogram itself
     bool operator==( const QgsRasterHistogram &h ) const
     {
       return ( h.bandNumber == bandNumber &&
                h.binCount == binCount &&
                h.includeOutOfRange == includeOutOfRange &&
-               h.maximum == maximum &&
-               h.minimum == minimum &&
+               qgsDoubleNear( h.maximum, maximum ) &&
+               qgsDoubleNear( h.minimum, minimum ) &&
                h.extent == extent &&
                h.width == width &&
                h.height == height );
     }
 
-    /** \brief The gdal band number (starts at 1)*/
-    int bandNumber;
+    //! \brief The gdal band number (starts at 1)
+    int bandNumber = 0;
 
-    /** \brief Number of bins (intervals,buckets) in histogram. */
-    int binCount;
+    //! \brief Number of bins (intervals,buckets) in histogram.
+    int binCount = 0;
 
-    /** \brief The number of non NULL cells used to calculate histogram. */
-    int nonNullCount;
+    //! \brief The number of non NULL cells used to calculate histogram.
+    int nonNullCount = 0;
 
-    /** \brief Whether histogram includes out of range values (in first and last bin) */
-    bool includeOutOfRange;
+    //! \brief Whether histogram includes out of range values (in first and last bin)
+    bool includeOutOfRange = false;
 
-    /** \brief Store the histogram for a given layer
-      * @note not available via python binding
-      */
-    HistogramVector histogramVector;
+    /**
+     * Stores the histogram for a given layer
+     */
+    QgsRasterHistogram::HistogramVector histogramVector;
 
-    /** \brief The maximum histogram value. */
-    double maximum;
+    //! \brief The maximum histogram value.
+    double maximum = 0;
 
-    /** \brief The minimum histogram value. */
-    double minimum;
+    //! \brief The minimum histogram value.
+    double minimum = 0;
 
-    /** \brief Number of columns used to calc histogram */
-    int width;
+    //! \brief Number of columns used to calc histogram
+    int width = 0;
 
-    /** \brief Number of rows used to calc histogram */
-    int height;
+    //! \brief Number of rows used to calc histogram
+    int height = 0;
 
-    /** \brief Extent used to calc histogram */
+    //! \brief Extent used to calc histogram
     QgsRectangle extent;
 
-    /** \brief Histogram is valid */
-    bool valid;
+    //! \brief Histogram is valid
+    bool valid = false;
 };
 #endif

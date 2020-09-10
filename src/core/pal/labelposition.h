@@ -27,17 +27,16 @@
  *
  */
 
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
+#ifndef LABELPOSITION_H
+#define LABELPOSITION_H
 
-#ifndef _LABELPOSITION_H
-#define _LABELPOSITION_H
+#define SIP_NO_FILE
 
+
+#include "qgis_core.h"
+#include "pointset.h"
+#include "palrtree.h"
 #include <fstream>
-
-#include "rtree.hpp"
-
 
 namespace pal
 {
@@ -48,43 +47,34 @@ namespace pal
 
 
   /**
-   * \brief LabelPositon is a candidate feature label position
+   * \ingroup core
+   * \brief LabelPosition is a candidate feature label position
+   * \class pal::LabelPosition
+   * \note not available in Python bindings
    */
-  class CORE_EXPORT LabelPosition
+  class CORE_EXPORT LabelPosition : public PointSet
   {
       friend class CostCalculator;
       friend class PolygonCostCalculator;
 
-    protected:
-
-      int id;
-      double cost;
-      FeaturePart *feature;
-
-      // bug # 1 (maxence 10/23/2008)
-      int probFeat;
-
-      int nbOverlap;
-
-      double x[4], y[4];
-      double alpha;
-      double w;
-      double h;
-
-      LabelPosition* nextPart;
-      int partId;
-
-      //True if label direction is the same as line / polygon ring direction.
-      //Could be used by the application to draw a directional arrow ('<' or '>')
-      //if the layer arrangement is P_LINE
-      bool reversed;
-
-      bool upsideDown;
-
-      bool isInConflictSinglePart( LabelPosition* lp );
-      bool isInConflictMultiPart( LabelPosition* lp );
-
     public:
+
+      /**
+       * \brief Position of label candidate relative to feature.
+       */
+      enum Quadrant
+      {
+        QuadrantAboveLeft,
+        QuadrantAbove,
+        QuadrantAboveRight,
+        QuadrantLeft,
+        QuadrantOver,
+        QuadrantRight,
+        QuadrantBelowLeft,
+        QuadrantBelow,
+        QuadrantBelowRight
+      };
+
       /**
        * \brief create a new LabelPosition
        *
@@ -96,96 +86,174 @@ namespace pal
        * \param alpha rotation in rad
        * \param cost geographic cost
        * \param feature labelpos owners
+       * \param isReversed label is reversed
+       * \param quadrant relative position of label to feature
        */
       LabelPosition( int id, double x1, double y1,
                      double w, double h,
                      double alpha, double cost,
-                     FeaturePart *feature, bool isReversed = false );
+                     FeaturePart *feature, bool isReversed = false, Quadrant quadrant = QuadrantOver );
 
-      /** copy constructor */
-      LabelPosition( const LabelPosition& other );
-
-      ~LabelPosition() { delete nextPart; }
-
+      //! Copy constructor
+      LabelPosition( const LabelPosition &other );
 
       /**
-       * \brief is the labelposition in the bounding-box ?
+       * \brief Is the labelposition in the bounding-box ? (intersect or inside????)
        *
        *\param bbox the bounding-box double[4] = {xmin, ymin, xmax, ymax}
        */
       bool isIn( double *bbox );
 
       /**
+       * \brief Is the labelposition intersect the bounding-box ?
+       *
+       *\param bbox the bounding-box double[4] = {xmin, ymin, xmax, ymax}
+       */
+      bool isIntersect( double *bbox );
+
+      /**
+       * Returns TRUE if the label position intersects a \a geometry.
+       */
+      bool intersects( const GEOSPreparedGeometry *geometry );
+
+      /**
+       * Returns TRUE if the label position is within a \a geometry.
+       */
+      bool within( const GEOSPreparedGeometry *geometry );
+
+      /**
+       * \brief Is the labelposition inside the bounding-box ?
+       *
+       *\param bbox the bounding-box double[4] = {xmin, ymin, xmax, ymax}
+       */
+      bool isInside( double *bbox );
+
+      /**
        * \brief Check whether or not this overlap with another labelPosition
        *
        * \param ls other labelposition
-       * \return true or false
+       * \returns TRUE or FALSE
        */
-      bool isInConflict( LabelPosition *ls );
+      bool isInConflict( const LabelPosition *ls ) const;
 
-      /** return bounding box - amin: xmin,ymin - amax: xmax,ymax */
+      //! Returns bounding box - amin: xmin,ymin - amax: xmax,ymax
       void getBoundingBox( double amin[2], double amax[2] ) const;
 
-      /** get distance from this label to a point. If point lies inside, returns negative number. */
-      double getDistanceToPoint( double xp, double yp );
+      //! Gets distance from this label to a point. If point lies inside, returns negative number.
+      double getDistanceToPoint( double xp, double yp ) const;
 
-      /** returns true if this label crosses the specified line */
-      bool isBorderCrossingLine( PointSet* feat );
+      //! Returns TRUE if this label crosses the specified line
+      bool crossesLine( PointSet *line ) const;
 
-      /** returns number of intersections with polygon (testing border and center) */
-      int getNumPointsInPolygon( int npol, double *xp, double *yp );
+      //! Returns TRUE if this label crosses the boundary of the specified polygon
+      bool crossesBoundary( PointSet *polygon ) const;
 
-      /** shift the label by specified offset */
+      /**
+       * Returns cost of position intersection with polygon (testing area of intersection and center).
+       * Cost ranges between 0 and 12, with extra cost if center of label position is covered.
+       */
+      int polygonIntersectionCost( PointSet *polygon ) const;
+
+      /**
+       * Returns TRUE if any intersection between polygon and position exists.
+      */
+      bool intersectsWithPolygon( PointSet *polygon ) const;
+
+      //! Shift the label by specified offset
       void offsetPosition( double xOffset, double yOffset );
 
-
-      /** \brief return id
-       * \return id
+      /**
+       * Returns the id
        */
       int getId() const;
 
 
-      /** \brief return the feature corresponding to this labelposition
-       * \return the feature
+      /**
+       * Returns the feature corresponding to this labelposition
        */
-      FeaturePart * getFeaturePart();
+      FeaturePart *getFeaturePart() const;
 
-      double getNumOverlaps() const { return nbOverlap; }
+      int getNumOverlaps() const { return nbOverlap; }
       void resetNumOverlaps() { nbOverlap = 0; } // called from problem.cpp, pal.cpp
 
+      /**
+       * Increases the number of overlaps recorded against this position by 1.
+       */
+      void incrementNumOverlaps() { nbOverlap++; }
+
+      /**
+       * Decreases the number of overlaps recorded against this position by 1.
+       */
+      void decrementNumOverlaps() { nbOverlap++; }
+
       int getProblemFeatureId() const { return probFeat; }
-      /** set problem feature ID and assigned label candidate ID.
-       *  called from pal.cpp during extraction */
+
+      /**
+       * Set problem feature ID and assigned label candidate ID.
+       * called from pal.cpp during extraction.
+      */
       void setProblemIds( int probFid, int lpId )
       {
-        probFeat = probFid; id = lpId;
-        if ( nextPart ) nextPart->setProblemIds( probFid, lpId );
+        probFeat = probFid;
+        id = lpId;
+        if ( mNextPart ) mNextPart->setProblemIds( probFid, lpId );
       }
 
-      /** return pointer to layer's name. used for stats */
-      char* getLayerName() const;
+      /**
+       * Returns the candidate label position's geographical cost.
+       * \see setCost
+       */
+      double cost() const { return mCost; }
 
       /**
-       * \brief get the position geographical cost
-       * \return geographical cost
+       * Sets the candidate label position's geographical cost.
+       * \param newCost new cost for position
+       * \see cost
+      */
+      void setCost( double newCost ) { mCost = newCost; }
+
+      /**
+       * Sets whether the position is marked as conflicting with an obstacle feature.
+       * \param conflicts set to TRUE to mark candidate as being in conflict
+       * \note This method applies to all label parts for the candidate position.
+       * \see conflictsWithObstacle
        */
-      double getCost() const;
+      void setConflictsWithObstacle( bool conflicts );
 
-      /** Modify candidate's cost */
-      void setCost( double newCost ) { cost = newCost; }
+      /**
+       * Returns whether the position is marked as conflicting with an obstacle feature.
+       * \see setConflictsWithObstacle
+       */
+      bool conflictsWithObstacle() const { return mHasObstacleConflict; }
 
-      /** Make sure the cost is less than 1 */
+      /**
+       * Sets whether the position is marked as having a hard conflict with an obstacle feature.
+       * A hard conflict means that the placement should (usually) not be considered, because the candidate
+       * conflicts with a obstacle of sufficient weight.
+       * \see hasHardObstacleConflict()
+       */
+      void setHasHardObstacleConflict( bool conflicts );
+
+      /**
+       * Returns whether the position is marked as having a hard conflict with an obstacle feature.
+       * A hard conflict means that the placement should (usually) not be considered, because the candidate
+       * conflicts with a obstacle of sufficient weight.
+       * \see setHasHardObstacleConflict()
+       */
+      bool hasHardObstacleConflict() const { return mHasHardConflict; }
+
+      //! Make sure the cost is less than 1
       void validateCost();
 
-
       /**
-       * \brief get the down-left x coordinate
-       * \return x coordinate
+       * Returns the down-left x coordinate.
+       * \see getY()
        */
       double getX( int i = 0 ) const;
+
       /**
-       * \brief get the down-left y coordinate
-       * \return y coordinate
+       * Returns the down-left y coordinate.
+       * \see getX()
        */
       double getY( int i = 0 ) const;
 
@@ -193,64 +261,100 @@ namespace pal
       double getHeight() const { return h; }
 
       /**
-       * \brief get alpha
-       * \return alpha to rotate text (in rad)
+       * Returns the angle to rotate text (in rad).
        */
       double getAlpha() const;
       bool getReversed() const { return reversed; }
       bool getUpsideDown() const { return upsideDown; }
 
-      void print();
+      Quadrant getQuadrant() const { return quadrant; }
 
-      LabelPosition* getNextPart() const { return nextPart; }
-      void setNextPart( LabelPosition* next ) { nextPart = next; }
+      /**
+       * Returns the next part of this label position (i.e. the next character for a curved label).
+       *
+       * \see setNextPart()
+       */
+      LabelPosition *nextPart() const { return mNextPart.get(); }
+
+      /**
+       * Sets the \a next part of this label position (i.e. the next character for a curved label).
+       *
+       * \see nextPart()
+       */
+      void setNextPart( std::unique_ptr< LabelPosition > next ) { mNextPart = std::move( next ); }
 
       // -1 if not multi-part
       int getPartId() const { return partId; }
       void setPartId( int id ) { partId = id; }
 
+      //! Increases the count of upside down characters for this label position
+      int incrementUpsideDownCharCount() { return ++mUpsideDownCharCount; }
 
-      void removeFromIndex( RTree<LabelPosition*, double, 2, double> *index );
-      void insertIntoIndex( RTree<LabelPosition*, double, 2, double> *index );
+      //! Returns the number of upside down characters for this label position
+      int upsideDownCharCount() const { return mUpsideDownCharCount; }
 
-      typedef struct
-      {
-        double scale;
-        Pal* pal;
-        PointSet *obstacle;
-      } PruneCtx;
-
-      /** Check whether the candidate in ctx overlap with obstacle feat */
-      static bool pruneCallback( LabelPosition *lp, void *ctx );
-
-      // for sorting
-      static bool costShrink( void *l, void *r );
-      static bool costGrow( void *l, void *r );
-
-      // for counting number of overlaps
-      typedef struct
-      {
-        LabelPosition *lp;
-        int *nbOv;
-        double *cost;
-        double *inactiveCost;
-        //int *feat;
-      } CountContext;
-
-      /*
-       * count overlap, ctx = p_lp
+      /**
+       * Removes the label position from the specified \a index.
        */
-      static bool countOverlapCallback( LabelPosition *lp, void *ctx );
+      void removeFromIndex( PalRtree<LabelPosition> &index );
 
-      static bool countFullOverlapCallback( LabelPosition *lp, void *ctx );
+      /**
+       * Inserts the label position into the specified \a index.
+       */
+      void insertIntoIndex( PalRtree<LabelPosition> &index );
 
-      static bool removeOverlapCallback( LabelPosition *lp, void *ctx );
+    protected:
 
-      // for polygon cost calculation
-      static bool polygonObstacleCallback( PointSet *feat, void *ctx );
+      int id;
 
+      FeaturePart *feature = nullptr;
+
+      // bug # 1 (maxence 10/23/2008)
+      int probFeat;
+
+      int nbOverlap;
+
+      double alpha;
+      double w;
+      double h;
+
+      int partId;
+
+      //True if label direction is the same as line / polygon ring direction.
+      //Could be used by the application to draw a directional arrow ('<' or '>')
+      //if the layer arrangement is P_LINE
+      bool reversed;
+
+      bool upsideDown;
+
+      LabelPosition::Quadrant quadrant;
+
+    private:
+
+      std::unique_ptr< LabelPosition > mNextPart;
+
+      double mCost;
+      bool mHasObstacleConflict;
+      bool mHasHardConflict = false;
+      int mUpsideDownCharCount;
+
+      /**
+       * Calculates the total number of parts for this label position
+       */
+      int partCount() const;
+
+      /**
+       * Calculates the polygon intersection cost for a single label position part
+       * \returns double between 0 - 12
+       */
+      double polygonIntersectionCostForParts( PointSet *polygon ) const;
+
+      bool isInConflictSinglePart( const LabelPosition *lp ) const;
+      bool isInConflictMultiPart( const LabelPosition *lp ) const;
+
+      LabelPosition &operator=( const LabelPosition & ) = delete;
   };
 
-} // end namespac
+} // end namespace
 
 #endif

@@ -17,13 +17,15 @@
 #ifndef QGSMESSAGEBAR_H
 #define QGSMESSAGEBAR_H
 
-#include <qgisgui.h>
+#include "qgsguiutils.h"
+#include "qgis.h"
 
 #include <QString>
 #include <QFrame>
 #include <QIcon>
 #include <QColor>
 #include <QList>
+#include "qgis_gui.h"
 
 class QWidget;
 class QGridLayout;
@@ -34,109 +36,230 @@ class QLabel;
 class QAction;
 class QTimer;
 
-/** \ingroup gui
+class QgsMessageBarItem;
+
+/**
+ * \ingroup gui
  * A bar for displaying non-blocking messages to the user.
- * \note added in 1.9
+ *
+ * QgsMessageBar is a reusable widget which allows for providing feedback to users in
+ * a non-intrusive way. Messages are shown in a horizontal bar widget, which is styled
+ * automatically to reflect the severity ("message level") of the displayed message (e.g.
+ * warning messages are styled in an orange color scheme, critical errors are shown in
+ * red, etc).
+ *
+ * The message bar supports automatic stacking of multiple messages, so that
+ * only the most recent message is shown to users. Users can then manually dismiss
+ * individual messages to remove them from the stack, causing the next-most-recent
+ * message to be shown. If no messages are available to show then the message bar
+ * automatically hides.
+ *
+ * The class also supports pushing custom widgets to the notification stack via
+ * the pushWidget() method.
  */
 class GUI_EXPORT QgsMessageBar: public QFrame
 {
     Q_OBJECT
 
   public:
-    enum MessageLevel
-    {
-      INFO = 0,
-      WARNING = 1,
-      CRITICAL = 2
-    };
 
-    QgsMessageBar( QWidget *parent = 0 );
-    ~QgsMessageBar();
+    //! Constructor for QgsMessageBar
+    QgsMessageBar( QWidget *parent SIP_TRANSFERTHIS = nullptr );
 
-    /*! display a widget on the bar after hiding the currently visible one
-     *  and putting it in a stack
-     * @param widget widget to add
-     * @param level is QgsMessageBar::INFO, WARNING or CRITICAL
-     * @param duration timeout duration of message in seconds, 0 value indicates no timeout
+    /**
+     * Display a message \a item on the bar, after hiding the currently visible one
+     * and putting it in a stack.
+     *
+     * The message bar will take ownership of \a item.
      */
-    void pushWidget( QWidget *widget, MessageLevel level = INFO, int duration = 0 );
+    void pushItem( QgsMessageBarItem *item SIP_TRANSFER );
 
-    /*! remove the passed widget from the bar (if previously added),
-     *  then display the next one in the stack if any or hide the bar
-     *  @param widget widget to remove
-     *  @return true if the widget was removed, false otherwise
+    /**
+     * Display a \a widget as a message on the bar, after hiding the currently visible one
+     * and putting it in a stack.
+     *
+     * \param widget message widget to display
+     * \param level is Qgis::Info, Warning, Critical or Success
+     * \param duration timeout duration of message in seconds, 0 value indicates no timeout (i.e.
+     * the message must be manually cleared by the user).
      */
-    bool popWidget( QWidget *widget );
+    QgsMessageBarItem *pushWidget( QWidget *widget SIP_TRANSFER, Qgis::MessageLevel level = Qgis::Info, int duration = 0 );
 
-    //! make out a widget containing a message to be displayed on the bar
-    static QWidget* createMessage( const QString &text, QWidget *parent = 0 ) { return createMessage( QString::null, text, QIcon(), parent ); }
-    //! make out a widget containing icon and message to be displayed on the bar
-    static QWidget* createMessage( const QString &text, const QIcon &icon, QWidget *parent = 0 ) { return createMessage( QString::null, text, icon, parent ); }
-    //! make out a widget containing title and message to be displayed on the bar
-    static QWidget* createMessage( const QString &title, const QString &text, QWidget *parent = 0 ) { return createMessage( title, text, QIcon(), parent ); }
-    //! make out a widget containing icon, title and message to be displayed on the bar
-    static QWidget* createMessage( const QString &title, const QString &text, const QIcon &icon, QWidget *parent = 0 );
+    /**
+     * Remove the specified \a item from the bar, and display the next most recent one in the stack.
+     * If no messages remain in the stack, then the bar will be hidden.
+     *
+     * \param item previously added item to remove.
+     * \returns TRUE if \a item was removed, FALSE otherwise
+     */
+    bool popWidget( QgsMessageBarItem *item );
 
-    //! convenience method for pushing a non-widget-based message to the bar
-    void pushMessage( const QString &text, MessageLevel level = INFO, int duration = 0 ) { pushMessage( QString::null, text, level, duration ); }
-    //! convenience method for pushing a non-widget-based message with title to the bar
-    void pushMessage( const QString &title, const QString &text, MessageLevel level = INFO, int duration = 0 );
+    /**
+     * Creates message bar item widget containing a message \a text to be displayed on the bar.
+     *
+     * The caller takes ownership of the returned item.
+     *
+     * \note This is a low-level API call. Users are recommended to use the high-level pushMessage() API call
+     * instead.
+     */
+    static QgsMessageBarItem *createMessage( const QString &text, QWidget *parent = nullptr ) SIP_FACTORY;
+
+    /**
+     * Creates message bar item widget containing a \a title and message \a text to be displayed on the bar.
+     *
+     * The caller takes ownership of the returned item.
+     *
+     * \note This is a low-level API call. Users are recommended to use the high-level pushMessage() API call
+     * instead.
+     */
+    static QgsMessageBarItem *createMessage( const QString &title, const QString &text, QWidget *parent = nullptr ) SIP_FACTORY;
+
+    /**
+     * Creates message bar item widget containing a custom \a widget to be displayed on the bar.
+     *
+     * The caller takes ownership of the returned item.
+     *
+     * \note This is a low-level API call. Users are recommended to use the high-level pushWidget() API call
+     * instead.
+     */
+    static QgsMessageBarItem *createMessage( QWidget *widget, QWidget *parent = nullptr ) SIP_FACTORY;
+
+    /**
+     * A convenience method for pushing a message with the specified \a text to the bar.
+     *
+     * The \a level argument specifies the desired message level (severity) of the message, which controls
+     * how the message bar is styled.
+     *
+     * The optional \a duration argument can be used to specify the message timeout in seconds. If \a duration
+     * is set to 0, then the message must be manually dismissed by the user.
+     */
+    void pushMessage( const QString &text, Qgis::MessageLevel level = Qgis::Info, int duration = 5 );
+
+    /**
+     * A convenience method for pushing a message with the specified \a title and \a text to the bar.
+     *
+     * The \a level argument specifies the desired message level (severity) of the message, which controls
+     * how the message bar is styled.
+     *
+     * The optional \a duration argument can be used to specify the message timeout in seconds. If \a duration
+     * is set to 0, then the message must be manually dismissed by the user.
+     */
+    void pushMessage( const QString &title, const QString &text, Qgis::MessageLevel level = Qgis::Info, int duration = 5 );
+
+    /**
+     * A convenience method for pushing a message with the specified \a title and \a text to the bar. Additional
+     * message content specified via \a showMore will be shown when the user presses a "more" button.
+     *
+     * The \a level argument specifies the desired message level (severity) of the message, which controls
+     * how the message bar is styled.
+     *
+     * The optional \a duration argument can be used to specify the message timeout in seconds. If \a duration
+     * is set to 0, then the message must be manually dismissed by the user.
+     */
+    void pushMessage( const QString &title, const QString &text, const QString &showMore, Qgis::MessageLevel level = Qgis::Info, int duration = 5 );
+
+    /**
+     * Returns the current visible item, or NULLPTR if no item is shown.
+     */
+    QgsMessageBarItem *currentItem();
+
+    /**
+     * Returns a list of all items currently visible or queued for the bar.
+     *
+     * \since QGIS 3.14
+     */
+    QList<QgsMessageBarItem *> items();
 
   signals:
-    //! emitted when a message widget is added to the bar
-    void widgetAdded( QWidget *widget );
 
-    //! emitted when a message widget was removed from the bar
-    void widgetRemoved( QWidget *widget );
+    /**
+     * Emitted whenever an \a item is added to the bar.
+     */
+    void widgetAdded( QgsMessageBarItem *item );
+
+    /**
+     * Emitted whenever an \a item was removed from the bar.
+     */
+    void widgetRemoved( QgsMessageBarItem *item );
 
   public slots:
-    /*! remove the currently displayed widget from the bar and
-     *  display the next in the stack if any or hide the bar
-     *  @return true if the widget was removed, false otherwise
+
+    /**
+     * Remove the currently displayed item from the bar and display the next item
+     * in the stack. If no remaining items are present, the bar will be hidden.
+     *
+     * \returns TRUE if the widget was removed, FALSE otherwise
      */
     bool popWidget();
 
-    /*! remove all items from the bar's widget list
-     *  @return true if all items were removed, false otherwise
+    /**
+     * Removes all items from the bar.
+     *
+     * \returns TRUE if all items were removed, FALSE otherwise
      */
     bool clearWidgets();
 
+    /**
+     * Pushes a success \a message with default timeout to the message bar.
+     *
+     * \param title title string for message
+     * \param message The message to be displayed
+     *
+     * \since QGIS 2.8
+     */
+    void pushSuccess( const QString &title, const QString &message );
+
+    /**
+     * Pushes a information \a message with default timeout to the message bar.
+     *
+     * \param title title string for message
+     * \param message The message to be displayed
+     *
+     * \since QGIS 2.8
+     */
+    void pushInfo( const QString &title, const QString &message );
+
+    /**
+     * Pushes a warning \a message with default timeout to the message bar.
+     *
+     * \param title title string for message
+     * \param message The message to be displayed
+     *
+     * \since QGIS 2.8
+     */
+    void pushWarning( const QString &title, const QString &message );
+
+    /**
+     * Pushes a critical warning \a message with default timeout to the message bar.
+     *
+     * \param title title string for message
+     * \param message The message to be displayed
+     *
+     * \since QGIS 2.8
+     */
+    void pushCritical( const QString &title, const QString &message );
+
   protected:
-    void mousePressEvent( QMouseEvent * e );
+    void mousePressEvent( QMouseEvent *e ) override;
 
   private:
-    class QgsMessageBarItem
-    {
-      public:
-        QgsMessageBarItem( QWidget *widget, const QString &styleSheet, int duration = 0 ):
-            mWidget( widget ), mStyleSheet( styleSheet ), mDuration( duration ) {}
-        ~QgsMessageBarItem() {}
-
-        QWidget* widget() const { return mWidget; }
-        QString styleSheet() const { return mStyleSheet; }
-        int duration() const { return mDuration; }
-
-      private:
-        QWidget *mWidget;
-        QString mStyleSheet;
-        int mDuration; // 0 value indicates no timeout duration
-    };
-
-    void pushWidget( QWidget *widget, const QString &styleSheet, int duration = 0 );
-
     void popItem( QgsMessageBarItem *item );
-    void pushItem( QgsMessageBarItem *item );
-
-    QgsMessageBarItem *mCurrentItem;
-    QList<QgsMessageBarItem *> mList;
-    QMenu *mCloseMenu;
-    QToolButton *mCloseBtn;
-    QGridLayout *mLayout;
-    QLabel *mItemCount;
-    QAction *mActionCloseAll;
-    QTimer *mCountdownTimer;
-    QProgressBar *mCountProgress;
+    void showItem( QgsMessageBarItem *item );
+    QgsMessageBarItem *mCurrentItem = nullptr;
+    QList<QgsMessageBarItem *> mItems;
+    QMenu *mCloseMenu = nullptr;
+    QToolButton *mCloseBtn = nullptr;
+    QGridLayout *mLayout = nullptr;
+    QLabel *mItemCount = nullptr;
+    QAction *mActionCloseAll = nullptr;
+    QTimer *mCountdownTimer = nullptr;
+    QProgressBar *mCountProgress = nullptr;
     QString mCountStyleSheet;
+    Qgis::MessageLevel mPrevLevel = Qgis::MessageLevel::None;
+
+    static constexpr int MAX_ITEMS = 100;
+
+    void removeLowestPriorityOldestItem();
 
   private slots:
     //! updates count of items in widget list
@@ -145,6 +268,8 @@ class GUI_EXPORT QgsMessageBar: public QFrame
     //! updates the countdown for widgets that have a timeout duration
     void updateCountdown();
     void resetCountdown();
+
+    friend class TestQgsMessageBar;
 };
 
 #endif

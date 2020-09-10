@@ -16,37 +16,69 @@
  ***************************************************************************/
 #ifndef QGSBOOKMARKS_H
 #define QGSBOOKMARKS_H
+
+#include <QSqlTableModel>
+#include <QSortFilterProxyModel>
+#include <QStyledItemDelegate>
+
 #include "ui_qgsbookmarksbase.h"
-#include "qgscontexthelp.h"
+#include "qgsdockwidget.h"
+#include "qgis_app.h"
 
-#include <QDialog>
+class QgsBookmark;
+class QgsBookmarkManager;
+class QgsBookmarkManagerProxyModel;
 
-class QgsBookmarks : public QDialog, private Ui::QgsBookmarksBase
+/**
+ * \brief QgsDoubleSpinBoxBookmarksDelegate class shows 6 digits when value is a double
+ */
+class QgsDoubleSpinBoxBookmarksDelegate : public QStyledItemDelegate
 {
     Q_OBJECT
 
   public:
-    static void showBookmarks();
-    static void newBookmark();
+
+    explicit QgsDoubleSpinBoxBookmarksDelegate( QObject *parent = nullptr );
+
+    QString displayText( const QVariant &value, const QLocale &locale ) const override;
+
+    QWidget *createEditor( QWidget *parent,
+                           const QStyleOptionViewItem &option,
+                           const QModelIndex &index ) const override;
+  private:
+
+    static const int  DECIMAL_PLACES;
+
+};
+
+
+class APP_EXPORT QgsBookmarks : public QgsDockWidget, private Ui::QgsBookmarksBase
+{
+    Q_OBJECT
+
+  public:
+    QgsBookmarks( QWidget *parent = nullptr );
+    ~QgsBookmarks() override;
+    QMap<QString, QModelIndex> getIndexMap();
+    void zoomToBookmarkIndex( const QModelIndex & );
+
+  public slots:
+    void addClicked();
 
   private slots:
-    void addClicked();
     void deleteClicked();
     void zoomToBookmark();
+    void exportToXml();
+    void importFromXml();
 
-    void on_lstBookmarks_doubleClicked( const QModelIndex & );
-    void on_buttonBox_helpRequested() { QgsContextHelp::run( metaObject()->className() ); }
+    void lstBookmarks_doubleClicked( const QModelIndex & );
 
   private:
-    QgsBookmarks( QWidget *parent = 0, Qt::WFlags fl = 0 );
-    ~QgsBookmarks();
+    QgsBookmarkManagerProxyModel *mBookmarkModel = nullptr;
 
     void saveWindowLocation();
-    void restorePosition();
 
-    static QgsBookmarks *sInstance;
 };
 
 
 #endif // QGSBOOKMARKS_H
-

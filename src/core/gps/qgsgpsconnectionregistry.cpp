@@ -18,42 +18,22 @@
 #include "qgsgpsconnectionregistry.h"
 #include "qgsgpsconnection.h"
 
-QgsGPSConnectionRegistry* QgsGPSConnectionRegistry::mInstance = 0;
-
-QgsGPSConnectionRegistry::QgsGPSConnectionRegistry()
+QgsGpsConnectionRegistry::~QgsGpsConnectionRegistry()
 {
-
+  qDeleteAll( mConnections );
 }
 
-QgsGPSConnectionRegistry::~QgsGPSConnectionRegistry()
-{
-  QSet<QgsGPSConnection*>::iterator it = mConnections.begin();
-  for ( ; it != mConnections.end(); ++it )
-  {
-    delete *it;
-  }
-}
-
-QgsGPSConnectionRegistry* QgsGPSConnectionRegistry::instance()
-{
-  if ( !mInstance )
-  {
-    mInstance = new QgsGPSConnectionRegistry();
-  }
-  return mInstance;
-}
-
-void QgsGPSConnectionRegistry::registerConnection( QgsGPSConnection* c )
+void QgsGpsConnectionRegistry::registerConnection( QgsGpsConnection *c )
 {
   mConnections.insert( c );
 }
 
-void QgsGPSConnectionRegistry::unregisterConnection( QgsGPSConnection* c )
+void QgsGpsConnectionRegistry::unregisterConnection( QgsGpsConnection *c )
 {
   mConnections.remove( c );
 }
 
-QList< QgsGPSConnection* > QgsGPSConnectionRegistry::connectionList() const
+QList< QgsGpsConnection * > QgsGpsConnectionRegistry::connectionList() const
 {
-  return mConnections.toList();
+  return qgis::setToList( mConnections );
 }

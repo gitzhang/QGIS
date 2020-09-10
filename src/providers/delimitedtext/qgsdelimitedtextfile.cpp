@@ -20,6 +20,7 @@
 
 #include <QtGlobal>
 #include <QFile>
+#include <QFileInfo>
 #include <QDataStream>
 #include <QTextStream>
 #include <QFileSystemWatcher>
@@ -27,36 +28,21 @@
 #include <QStringList>
 #include <QRegExp>
 #include <QUrl>
+#include <QUrlQuery>
 
-static QString DefaultFieldName( "field_%1" );
-static QRegExp InvalidFieldRegexp( "^\\d*(\\.\\d*)?$" );
-// field_ is optional in following regexp to simplify QgsDelimitedTextFile::fieldNumber()
-static QRegExp DefaultFieldRegexp( "^(?:field_)?(\\d+)$", Qt::CaseInsensitive );
-
-QgsDelimitedTextFile::QgsDelimitedTextFile( QString url ) :
-    mFileName( QString() ),
-    mEncoding( "UTF-8" ),
-    mFile( 0 ),
-    mStream( 0 ),
-    mUseWatcher( true ),
-    mWatcher( 0 ),
-    mDefinitionValid( false ),
-    mUseHeader( true ),
-    mDiscardEmptyFields( false ),
-    mTrimFields( false ),
-    mSkipLines( 0 ),
-    mMaxFields( 0 ),
-    mMaxNameLength( 200 ),  // Don't want field names to be too unweildy!
-    mLineNumber( -1 ),
-    mRecordLineNumber( -1 ),
-    mRecordNumber( -1 ),
-    mHoldCurrentRecord( false ),
-    mMaxRecordNumber( -1 ),
-    mMaxFieldCount( 0 )
+QgsDelimitedTextFile::QgsDelimitedTextFile( const QString &url )
+  : mFileName( QString() )
+  , mEncoding( QStringLiteral( "UTF-8" ) )
+  , mDefaultFieldName( QStringLiteral( "field_%1" ) )
+  , mDefaultFieldRegexp( "^(?:field_)(\\d+)$", Qt::CaseInsensitive )
 {
   // The default type is CSV
   setTypeCSV();
   if ( ! url.isNull() ) setFromUrl( url );
+
+  // For tests
+  QString bufferSizeStr( getenv( "QGIS_DELIMITED_TEXT_FILE_BUFFER_SIZE" ) );
+  mMaxBufferSize = bufferSizeStr.isEmpty() ? 1024 * 1024 : bufferSizeStr.toInt();
 }
 
 
@@ -70,17 +56,17 @@ void QgsDelimitedTextFile::close()
   if ( mStream )
   {
     delete mStream;
-    mStream = 0;
+    mStream = nullptr;
   }
   if ( mFile )
   {
     delete mFile;
-    mFile = 0;
+    mFile = nullptr;
   }
   if ( mWatcher )
   {
     delete mWatcher;
-    mWatcher = 0;
+    mWatcher = nullptr;
   }
   mLineNumber = -1;
   mRecordLineNumber = -1;
@@ -97,33 +83,33 @@ bool QgsDelimitedTextFile::open()
     mFile = new QFile( mFileName );
     if ( ! mFile->open( QIODevice::ReadOnly ) )
     {
-      QgsDebugMsg( "Data file " + mFileName + " could not be opened" );
+      QgsDebugMsgLevel( "Data file " + mFileName + " could not be opened", 2 );
       delete mFile;
-      mFile = 0;
+      mFile = nullptr;
     }
     if ( mFile )
     {
       mStream = new QTextStream( mFile );
       if ( ! mEncoding.isEmpty() )
       {
-        QTextCodec *codec =  QTextCodec::codecForName( mEncoding.toAscii() );
+        QTextCodec *codec = QTextCodec::codecForName( mEncoding.toLatin1() );
         mStream->setCodec( codec );
       }
       if ( mUseWatcher )
       {
-        mWatcher = new QFileSystemWatcher( this );
+        mWatcher = new QFileSystemWatcher();
         mWatcher->addPath( mFileName );
-        connect( mWatcher, SIGNAL( fileChanged( QString ) ), this, SLOT( updateFile() ) );
+        connect( mWatcher, &QFileSystemWatcher::fileChanged, this, &QgsDelimitedTextFile::updateFile );
       }
     }
   }
-  return mFile != 0;
+  return nullptr != mFile;
 }
 
 void QgsDelimitedTextFile::updateFile()
 {
   close();
-  emit( fileUpdated() );
+  emit fileUpdated();
 }
 
 // Clear information based on current definition of file
@@ -135,14 +121,14 @@ void QgsDelimitedTextFile::resetDefinition()
 }
 
 // Extract the provider definition from the url
-bool QgsDelimitedTextFile::setFromUrl( QString url )
+bool QgsDelimitedTextFile::setFromUrl( const QString &url )
 {
-  QUrl qurl = QUrl::fromEncoded( url.toAscii() );
+  QUrl qurl = QUrl::fromEncoded( url.toLatin1() );
   return setFromUrl( qurl );
 }
 
 // Extract the provider definition from the url
-bool QgsDelimitedTextFile::setFromUrl( QUrl &url )
+bool QgsDelimitedTextFile::setFromUrl( const QUrl &url )
 {
   // Close any existing definition
   resetDefinition();
@@ -151,105 +137,106 @@ bool QgsDelimitedTextFile::setFromUrl( QUrl &url )
   setFileName( url.toLocalFile() );
 
   // Extract the encoding
-  if ( url.hasQueryItem( "encoding" ) )
+  const QUrlQuery query( url );
+  if ( query.hasQueryItem( QStringLiteral( "encoding" ) ) )
   {
-    mEncoding = url.queryItemValue( "encoding" );
+    mEncoding = query.queryItemValue( QStringLiteral( "encoding" ) );
   }
 
   //
-  if ( url.hasQueryItem( "useWatcher" ) )
+  if ( query.hasQueryItem( QStringLiteral( "watchFile" ) ) )
   {
-    mUseWatcher = ! url.queryItemValue( "useWatcher" ).toUpper().startsWith( 'N' );;
+    mUseWatcher = query.queryItemValue( QStringLiteral( "watchFile" ) ).toUpper().startsWith( 'Y' );
   }
 
   // The default type is csv, to be consistent with the
   // previous implementation (except that quoting should be handled properly)
 
-  QString type( "csv" );
-  QString delimiter( "," );
-  QString quote = "\"";
-  QString escape = "\"";
+  QString type( QStringLiteral( "csv" ) );
+  QString delimiter( QStringLiteral( "," ) );
+  QString quote = QStringLiteral( "\"" );
+  QString escape = QStringLiteral( "\"" );
   mUseHeader = true;
   mSkipLines = 0;
 
   // Prefer simple "type" for delimiter type, but include delimiterType
   // as optional name  for backwards compatibility
-  if ( url.hasQueryItem( "type" ) || url.hasQueryItem( "delimiterType" ) )
+  if ( query.hasQueryItem( QStringLiteral( "type" ) ) || query.hasQueryItem( QStringLiteral( "delimiterType" ) ) )
   {
-    if ( url.hasQueryItem( "type" ) )
-      type = url.queryItemValue( "type" );
-    else if ( url.hasQueryItem( "delimiterType" ) )
-      type = url.queryItemValue( "delimiterType" );
+    if ( query.hasQueryItem( QStringLiteral( "type" ) ) )
+      type = query.queryItemValue( QStringLiteral( "type" ) );
+    else if ( query.hasQueryItem( QStringLiteral( "delimiterType" ) ) )
+      type = query.queryItemValue( QStringLiteral( "delimiterType" ) );
 
     // Support for previous version of Qgs - plain chars had
     // quote characters ' or "
-    if ( type == "plain" )
+    if ( type == QLatin1String( "plain" ) )
     {
-      quote = "'\"";
-      escape = "";
+      quote = QStringLiteral( "'\"" );
+      escape.clear();
     }
-    else if ( type == "regexp " )
+    else if ( type == QLatin1String( "regexp " ) )
     {
-      delimiter = "";
-      quote = "";
-      escape = "";
+      delimiter.clear();
+      quote.clear();
+      escape.clear();
     }
   }
-  if ( url.hasQueryItem( "delimiter" ) )
+  if ( query.hasQueryItem( QStringLiteral( "delimiter" ) ) )
   {
-    delimiter = url.queryItemValue( "delimiter" );
+    delimiter = query.queryItemValue( QStringLiteral( "delimiter" ) );
   }
-  if ( url.hasQueryItem( "quote" ) )
+  if ( query.hasQueryItem( QStringLiteral( "quote" ) ) )
   {
-    quote = url.queryItemValue( "quote" );
+    quote = query.queryItemValue( QStringLiteral( "quote" ) );
   }
-  if ( url.hasQueryItem( "escape" ) )
+  if ( query.hasQueryItem( QStringLiteral( "escape" ) ) )
   {
-    escape = url.queryItemValue( "escape" );
+    escape = query.queryItemValue( QStringLiteral( "escape" ) );
   }
-  if ( url.hasQueryItem( "skipLines" ) )
+  if ( query.hasQueryItem( QStringLiteral( "skipLines" ) ) )
   {
-    mSkipLines = url.queryItemValue( "skipLines" ).toInt();
+    mSkipLines = query.queryItemValue( QStringLiteral( "skipLines" ) ).toInt();
   }
-  if ( url.hasQueryItem( "useHeader" ) )
+  if ( query.hasQueryItem( QStringLiteral( "useHeader" ) ) )
   {
-    mUseHeader = ! url.queryItemValue( "useHeader" ).toUpper().startsWith( 'N' );
+    mUseHeader = ! query.queryItemValue( QStringLiteral( "useHeader" ) ).toUpper().startsWith( 'N' );
   }
-  if ( url.hasQueryItem( "skipEmptyFields" ) )
+  if ( query.hasQueryItem( QStringLiteral( "skipEmptyFields" ) ) )
   {
-    mDiscardEmptyFields = ! url.queryItemValue( "skipEmptyFields" ).toUpper().startsWith( 'N' );
+    mDiscardEmptyFields = ! query.queryItemValue( QStringLiteral( "skipEmptyFields" ) ).toUpper().startsWith( 'N' );
   }
-  if ( url.hasQueryItem( "trimFields" ) )
+  if ( query.hasQueryItem( QStringLiteral( "trimFields" ) ) )
   {
-    mTrimFields = ! url.queryItemValue( "trimFields" ).toUpper().startsWith( 'N' );;
+    mTrimFields = ! query.queryItemValue( QStringLiteral( "trimFields" ) ).toUpper().startsWith( 'N' );
   }
-  if ( url.hasQueryItem( "maxFields" ) )
+  if ( query.hasQueryItem( QStringLiteral( "maxFields" ) ) )
   {
-    mMaxFields = url.queryItemValue( "maxFields" ).toInt();
+    mMaxFields = query.queryItemValue( QStringLiteral( "maxFields" ) ).toInt();
   }
 
-  QgsDebugMsg( "Delimited text file is: " + mFileName );
-  QgsDebugMsg( "Encoding is: " + mEncoding );
-  QgsDebugMsg( "Delimited file type is: " + type );
-  QgsDebugMsg( "Delimiter is: [" + delimiter + "]" );
-  QgsDebugMsg( "Quote character is: [" + quote + "]" );
-  QgsDebugMsg( "Escape character is: [" + escape + "]" );
-  QgsDebugMsg( "Skip lines: " + QString::number( mSkipLines ) );
-  QgsDebugMsg( "Maximum number of fields in record: " + QString::number( mMaxFields ) );
-  QgsDebugMsg( "Use headers: " + QString( mUseHeader ? "Yes" : "No" ) );
-  QgsDebugMsg( "Discard empty fields: " + QString( mDiscardEmptyFields ? "Yes" : "No" ) );
-  QgsDebugMsg( "Trim fields: " + QString( mTrimFields ? "Yes" : "No" ) );
+  QgsDebugMsgLevel( "Delimited text file is: " + mFileName, 2 );
+  QgsDebugMsgLevel( "Encoding is: " + mEncoding, 2 );
+  QgsDebugMsgLevel( "Delimited file type is: " + type, 2 );
+  QgsDebugMsgLevel( "Delimiter is: [" + delimiter + ']', 2 );
+  QgsDebugMsgLevel( "Quote character is: [" + quote + ']', 2 );
+  QgsDebugMsgLevel( "Escape character is: [" + escape + ']', 2 );
+  QgsDebugMsgLevel( "Skip lines: " + QString::number( mSkipLines ), 2 );
+  QgsDebugMsgLevel( "Maximum number of fields in record: " + QString::number( mMaxFields ), 2 );
+  QgsDebugMsgLevel( "Use headers: " + QString( mUseHeader ? "Yes" : "No" ), 2 );
+  QgsDebugMsgLevel( "Discard empty fields: " + QString( mDiscardEmptyFields ? "Yes" : "No" ), 2 );
+  QgsDebugMsgLevel( "Trim fields: " + QString( mTrimFields ? "Yes" : "No" ), 2 );
 
   // Support for previous version of plain characters
-  if ( type == "csv" || type == "plain" )
+  if ( type == QLatin1String( "csv" ) || type == QLatin1String( "plain" ) )
   {
     setTypeCSV( delimiter, quote, escape );
   }
-  else if ( type == "whitespace" )
+  else if ( type == QLatin1String( "whitespace" ) )
   {
     setTypeWhitespace();
   }
-  else if ( type == "regexp" )
+  else if ( type == QLatin1String( "regexp" ) )
   {
     setTypeRegexp( delimiter );
   }
@@ -263,57 +250,59 @@ bool QgsDelimitedTextFile::setFromUrl( QUrl &url )
 QUrl QgsDelimitedTextFile::url()
 {
   QUrl url = QUrl::fromLocalFile( mFileName );
-  if ( mEncoding != "UTF-8" )
+  QUrlQuery query( url );
+  if ( mEncoding != QLatin1String( "UTF-8" ) )
   {
-    url.addQueryItem( "encoding", mEncoding );
+    query.addQueryItem( QStringLiteral( "encoding" ), mEncoding );
   }
 
-  if ( !mUseWatcher )
+  if ( mUseWatcher )
   {
-    url.addQueryItem( "useWatcher", "no" );
+    query.addQueryItem( QStringLiteral( "watchFile" ), QStringLiteral( "yes" ) );
   }
 
-  url.addQueryItem( "type", type() );
+  query.addQueryItem( QStringLiteral( "type" ), type() );
   if ( mType == DelimTypeRegexp )
   {
-    url.addQueryItem( "delimiter", mDelimRegexp.pattern() );
+    query.addQueryItem( QStringLiteral( "delimiter" ), mDelimRegexp.pattern() );
   }
   if ( mType == DelimTypeCSV )
   {
-    if ( mDelimChars != "," ) url.addQueryItem( "delimiter", encodeChars( mDelimChars ) );
-    if ( mQuoteChar != "\"" ) url.addQueryItem( "quote", encodeChars( mQuoteChar ) );
-    if ( mEscapeChar != "\"" ) url.addQueryItem( "escape", encodeChars( mEscapeChar ) );
+    if ( mDelimChars != QLatin1String( "," ) ) query.addQueryItem( QStringLiteral( "delimiter" ), encodeChars( mDelimChars ) );
+    if ( mQuoteChar != QLatin1String( "\"" ) ) query.addQueryItem( QStringLiteral( "quote" ), encodeChars( mQuoteChar ) );
+    if ( mEscapeChar != QLatin1String( "\"" ) ) query.addQueryItem( QStringLiteral( "escape" ), encodeChars( mEscapeChar ) );
   }
   if ( mSkipLines > 0 )
   {
-    url.addQueryItem( "skipLines", QString::number( mSkipLines ) );
+    query.addQueryItem( QStringLiteral( "skipLines" ), QString::number( mSkipLines ) );
   }
   if ( ! mUseHeader )
   {
-    url.addQueryItem( "useHeader", "No" );
+    query.addQueryItem( QStringLiteral( "useHeader" ), QStringLiteral( "No" ) );
   }
   if ( mTrimFields )
   {
-    url.addQueryItem( "trimFields", "Yes" );
+    query.addQueryItem( QStringLiteral( "trimFields" ), QStringLiteral( "Yes" ) );
   }
   if ( mDiscardEmptyFields && mType != DelimTypeWhitespace )
   {
-    url.addQueryItem( "skipEmptyFields", "Yes" );
+    query.addQueryItem( QStringLiteral( "skipEmptyFields" ), QStringLiteral( "Yes" ) );
   }
   if ( mMaxFields > 0 )
   {
-    url.addQueryItem( "maxFields", QString::number( mMaxFields ) );
+    query.addQueryItem( QStringLiteral( "maxFields" ), QString::number( mMaxFields ) );
   }
+  url.setQuery( query );
   return url;
 }
 
-void QgsDelimitedTextFile::setFileName( QString filename )
+void QgsDelimitedTextFile::setFileName( const QString &filename )
 {
   resetDefinition();
   mFileName = filename;
 }
 
-void QgsDelimitedTextFile::setEncoding( QString encoding )
+void QgsDelimitedTextFile::setEncoding( const QString &encoding )
 {
   resetDefinition();
   mEncoding = encoding;
@@ -327,63 +316,62 @@ void QgsDelimitedTextFile::setUseWatcher( bool useWatcher )
 
 QString QgsDelimitedTextFile::type()
 {
-  if ( mType == DelimTypeWhitespace ) return QString( "whitespace" );
-  if ( mType == DelimTypeCSV ) return QString( "csv" );
-  if ( mType == DelimTypeRegexp ) return QString( "regexp" );
-  return QString( "csv" );
+  if ( mType == DelimTypeWhitespace ) return QStringLiteral( "whitespace" );
+  if ( mType == DelimTypeCSV ) return QStringLiteral( "csv" );
+  if ( mType == DelimTypeRegexp ) return QStringLiteral( "regexp" );
+  return QStringLiteral( "csv" );
 }
 
 void QgsDelimitedTextFile::setTypeWhitespace()
 {
-  setTypeRegexp( "\\s+" );
+  setTypeRegexp( QStringLiteral( "\\s+" ) );
   mDiscardEmptyFields = true;
   mType = DelimTypeWhitespace;
 }
 
-void QgsDelimitedTextFile::setTypeRegexp( QString regexp )
+void QgsDelimitedTextFile::setTypeRegexp( const QString &regexp )
 {
   resetDefinition();
   mType = DelimTypeRegexp;
   mDelimRegexp.setPattern( regexp );
-  mAnchoredRegexp = regexp.startsWith( "^" );
+  mAnchoredRegexp = regexp.startsWith( '^' );
   mParser = &QgsDelimitedTextFile::parseRegexp;
-  mDefinitionValid = regexp.size() > 0 && mDelimRegexp.isValid();
+  mDefinitionValid = !regexp.isEmpty() && mDelimRegexp.isValid();
   if ( ! mDefinitionValid )
   {
-    QgsDebugMsg( "Invalid regular expression in delimited text file delimiter: " + regexp );
+    QgsDebugMsgLevel( "Invalid regular expression in delimited text file delimiter: " + regexp, 2 );
   }
   else if ( mAnchoredRegexp && mDelimRegexp.captureCount() == 0 )
   {
     mDefinitionValid = false;
-    QgsDebugMsg( "Invalid anchored regular expression - must have capture groups: " + regexp );
+    QgsDebugMsgLevel( "Invalid anchored regular expression - must have capture groups: " + regexp, 2 );
   }
 }
 
 QString QgsDelimitedTextFile::decodeChars( QString chars )
 {
-  chars = chars.replace( "\\t", "\t" );
+  chars = chars.replace( QLatin1String( "\\t" ), QLatin1String( "\t" ) );
   return chars;
 }
 
 QString QgsDelimitedTextFile::encodeChars( QString chars )
 {
-  chars = chars.replace( "\t", "\\t" );
+  chars = chars.replace( '\t', QLatin1String( "\\t" ) );
   return chars;
 }
 
-void QgsDelimitedTextFile::setTypeCSV( QString delim, QString quote, QString escape )
+void QgsDelimitedTextFile::setTypeCSV( const QString &delim, const QString &quote, const QString &escape )
 {
   resetDefinition();
-  mType = DelimTypeRegexp;
   mType = DelimTypeCSV;
   mDelimChars = decodeChars( delim );
   mQuoteChar = decodeChars( quote );
   mEscapeChar = decodeChars( escape );
   mParser = &QgsDelimitedTextFile::parseQuoted;
-  mDefinitionValid = mDelimChars.size() > 0;
+  mDefinitionValid = !mDelimChars.isEmpty();
   if ( ! mDefinitionValid )
   {
-    QgsDebugMsg( "Invalid empty delimiter defined for text file delimiter" );
+    QgsDebugMsgLevel( QStringLiteral( "Invalid empty delimiter defined for text file delimiter" ), 2 );
   }
 }
 
@@ -421,23 +409,24 @@ void QgsDelimitedTextFile::setDiscardEmptyFields( bool discardEmptyFields )
 void QgsDelimitedTextFile::setFieldNames( const QStringList &names )
 {
   mFieldNames.clear();
-  foreach ( QString name, names )
+  const auto constNames = names;
+  for ( QString name : constNames )
   {
     bool nameOk = true;
     int fieldNo = mFieldNames.size() + 1;
     name = name.trimmed();
     if ( name.length() > mMaxNameLength ) name = name.mid( 0, mMaxNameLength );
 
-    // If the name is invalid then reset it to default name
-    if ( InvalidFieldRegexp.exactMatch( name ) )
+    // If the name is empty then reset it to default name
+    if ( name.length() == 0 )
     {
-      name = DefaultFieldName.arg( fieldNo );
+      name = mDefaultFieldName.arg( fieldNo );
     }
     // If the name looks like a default field name (field_##), then it is
     // valid if the number matches its column number..
-    else if ( DefaultFieldRegexp.indexIn( name ) == 0 )
+    else if ( mDefaultFieldRegexp.indexIn( name ) == 0 )
     {
-      int col = DefaultFieldRegexp.capturedTexts()[1].toInt();
+      int col = mDefaultFieldRegexp.capturedTexts().at( 1 ).toInt();
       nameOk = col == fieldNo;
     }
     // Otherwise it is valid if isn't the name of an existing field...
@@ -455,9 +444,9 @@ void QgsDelimitedTextFile::setFieldNames( const QStringList &names )
       {
         suffix++;
         name = basename.arg( suffix );
-        // Not ok if it is already in the name list
+        // Not OK if it is already in the name list
         if ( mFieldNames.contains( name, Qt::CaseInsensitive ) ) continue;
-        // Not ok if it is already in proposed names
+        // Not OK if it is already in proposed names
         if ( names.contains( name, Qt::CaseInsensitive ) ) continue;
         break;
       }
@@ -478,22 +467,22 @@ QStringList &QgsDelimitedTextFile::fieldNames()
   {
     for ( int i = mFieldNames.size() + 1; i <= mMaxFieldCount; i++ )
     {
-      mFieldNames.append( DefaultFieldName.arg( i ) );
+      mFieldNames.append( mDefaultFieldName.arg( i ) );
     }
   }
   return mFieldNames;
 }
 
-int QgsDelimitedTextFile::fieldIndex( QString name )
+int QgsDelimitedTextFile::fieldIndex( const QString &name )
 {
   // If not yet opened then reset file to read column headers
   //
   if ( mUseHeader && ! mFile ) reset();
   // Try to determine the field based on a default field name, includes
   // Field_### and simple integer fields.
-  if ( DefaultFieldRegexp.indexIn( name ) == 0 )
+  if ( mDefaultFieldRegexp.indexIn( name ) == 0 )
   {
-    return DefaultFieldRegexp.capturedTexts()[1].toInt() - 1;
+    return mDefaultFieldRegexp.capturedTexts().at( 1 ).toInt() - 1;
   }
   for ( int i = 0; i < mFieldNames.size(); i++ )
   {
@@ -505,7 +494,8 @@ int QgsDelimitedTextFile::fieldIndex( QString name )
 
 bool QgsDelimitedTextFile::setNextRecordId( long nextRecordId )
 {
-  if ( ! mFile ) return false;
+  if ( ! mFile ) reset();
+
   mHoldCurrentRecord = nextRecordId == mRecordLineNumber;
   if ( mHoldCurrentRecord ) return true;
   return setNextLineNumber( nextRecordId );
@@ -547,7 +537,6 @@ QgsDelimitedTextFile::Status QgsDelimitedTextFile::nextRecord( QStringList &reco
   return status;
 }
 
-
 QgsDelimitedTextFile::Status  QgsDelimitedTextFile::reset()
 {
   // Make sure the file is valid open
@@ -558,12 +547,14 @@ QgsDelimitedTextFile::Status  QgsDelimitedTextFile::reset()
   mLineNumber = 0;
   mRecordNumber = -1;
   mRecordLineNumber = -1;
+  mBuffer = QString();
+  mPosInBuffer = 0;
 
   // Skip header lines
   for ( int i = mSkipLines; i-- > 0; )
   {
-    if ( mStream->readLine().isNull() ) return RecordEOF;
-    mLineNumber++;
+    QString ignoredContent;
+    if ( nextLine( ignoredContent ) == RecordEOF ) return RecordEOF;
   }
   // Read the column names
   Status result = RecordOk;
@@ -584,11 +575,79 @@ QgsDelimitedTextFile::Status QgsDelimitedTextFile::nextLine( QString &buffer, bo
     Status status = reset();
     if ( status != RecordOk ) return status;
   }
-
-  while ( ! mStream->atEnd() )
+  if ( mLineNumber == 0 )
   {
-    buffer = mStream->readLine();
-    if ( buffer.isNull() ) break;
+    mPosInBuffer = 0;
+    mBuffer = mStream->read( mMaxBufferSize );
+  }
+
+  while ( !mBuffer.isEmpty() )
+  {
+    // Identify position of \r , \n or \r\n
+    // We should rather use mStream->readLine(), but it fails to detect \r
+    // line endings.
+    int eolPos = mBuffer.indexOf( '\r', mPosInBuffer );
+    int nextPos = 0;
+    if ( eolPos >= 0 )
+    {
+      nextPos = eolPos + 1;
+      // Check if there is a \n just afterwards
+      if ( eolPos + 1 < mBuffer.size() )
+      {
+        if ( mBuffer[eolPos + 1] == '\n' )
+        {
+          nextPos = eolPos + 2;
+        }
+      }
+      else
+      {
+        // If we are just at the end of the buffer, read an extra character
+        // from the stream
+        QString newChar = mStream->read( 1 );
+        mBuffer += newChar;
+        if ( newChar == '\n' )
+        {
+          nextPos = eolPos + 2;
+        }
+      }
+    }
+    else
+    {
+      eolPos = mBuffer.indexOf( '\n', mPosInBuffer );
+      if ( eolPos >= 0 )
+      {
+        nextPos = eolPos + 1;
+      }
+    }
+    if ( eolPos < 0 )
+    {
+      if ( mPosInBuffer == 0 )
+      {
+        // If our current position was the beginning of the buffer and we
+        // didn't find any end of line character, then return the whole buffer
+        // (to avoid unbounded line sizes)
+        // and set the buffer to null so that we don't iterate any more.
+        buffer = mBuffer;
+        mBuffer = QString();
+      }
+      else
+      {
+        // Read more bytes from file to have up to mMaxBufferSize characters
+        // in our buffer (after having subset it from mPosInBuffer)
+        mBuffer = mBuffer.mid( mPosInBuffer );
+        mBuffer += mStream->read( mMaxBufferSize - mBuffer.size() );
+        mPosInBuffer = 0;
+        continue;
+      }
+    }
+    else
+    {
+      // Extract the current line from the buffer
+      buffer = mBuffer.mid( mPosInBuffer, eolPos - mPosInBuffer );
+      // Update current position in buffer to be the one next to the end of
+      // line character(s)
+      mPosInBuffer = nextPos;
+    }
     mLineNumber++;
     if ( skipBlank && buffer.isEmpty() ) continue;
     return RecordOk;
@@ -705,11 +764,8 @@ QgsDelimitedTextFile::Status QgsDelimitedTextFile::parseQuoted( QString &buffer,
 
   while ( true )
   {
-    QChar c = buffer[cp];
-    cp++;
-
     // If end of line then if escaped or buffered then try to get more...
-    if ( cp > cpmax )
+    if ( cp >= cpmax )
     {
       if ( quoted || escaped )
       {
@@ -727,6 +783,9 @@ QgsDelimitedTextFile::Status QgsDelimitedTextFile::parseQuoted( QString &buffer,
       }
       break;
     }
+
+    QChar c = buffer[cp];
+    cp++;
 
     // If escaped, then just append the character
     if ( escaped )
@@ -772,7 +831,7 @@ QgsDelimitedTextFile::Status QgsDelimitedTextFile::parseQuoted( QString &buffer,
         else
         {
           quoted = false;
-          ended =  true;
+          ended = true;
         }
       }
       // quote char at start of field .. start of quoted fields
@@ -839,7 +898,6 @@ QgsDelimitedTextFile::Status QgsDelimitedTextFile::parseQuoted( QString &buffer,
 
 bool QgsDelimitedTextFile::isValid()
 {
-
-  return mDefinitionValid && QFile::exists( mFileName );
+  return mDefinitionValid && QFile::exists( mFileName ) && QFileInfo( mFileName ).size() > 0;
 }
 

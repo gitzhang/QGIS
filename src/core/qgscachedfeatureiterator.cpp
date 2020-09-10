@@ -3,7 +3,7 @@
      --------------------------------------
     Date                 : 12.2.2013
     Copyright            : (C) 2013 Matthias Kuhn
-    Email                : matthias dot kuhn at gmx dot ch
+    Email                : matthias at opengis dot ch
  ***************************************************************************
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -15,56 +15,135 @@
 
 #include "qgscachedfeatureiterator.h"
 #include "qgsvectorlayercache.h"
+#include "qgsexception.h"
+#include "qgsvectorlayer.h"
 
-QgsCachedFeatureIterator::QgsCachedFeatureIterator( QgsVectorLayerCache *vlCache, QgsFeatureRequest featureRequest, QgsFeatureIds featureIds )
-    : QgsAbstractFeatureIterator( featureRequest )
-    , mFeatureIds( featureIds )
-    , mVectorLayerCache( vlCache )
+QgsCachedFeatureIterator::QgsCachedFeatureIterator( QgsVectorLayerCache *vlCache, const QgsFeatureRequest &featureRequest )
+  : QgsAbstractFeatureIterator( featureRequest )
+  , mVectorLayerCache( vlCache )
 {
-  mFeatureIdIterator = featureIds.begin();
+  if ( mRequest.destinationCrs().isValid() && mRequest.destinationCrs() != mVectorLayerCache->sourceCrs() )
+  {
+    mTransform = QgsCoordinateTransform( mVectorLayerCache->sourceCrs(), mRequest.destinationCrs(), mRequest.transformContext() );
+  }
+  try
+  {
+    mFilterRect = filterRectToSourceCrs( mTransform );
+  }
+  catch ( QgsCsException & )
+  {
+    // can't reproject mFilterRect
+    close();
+    return;
+  }
+  if ( !mFilterRect.isNull() )
+  {
+    // update request to be the unprojected filter rect
+    mRequest.setFilterRect( mFilterRect );
+  }
+
+  switch ( featureRequest.filterType() )
+  {
+    case QgsFeatureRequest::FilterFids:
+      mFeatureIds = featureRequest.filterFids();
+      break;
+
+    case QgsFeatureRequest::FilterFid:
+      mFeatureIds = QgsFeatureIds() << featureRequest.filterFid();
+      break;
+
+    default:
+      mFeatureIds = qgis::listToSet( mVectorLayerCache->mCache.keys() );
+      break;
+  }
+
+  mFeatureIdIterator = mFeatureIds.constBegin();
+
+  if ( mFeatureIdIterator == mFeatureIds.constEnd() )
+    close();
 }
 
-bool QgsCachedFeatureIterator::nextFeature( QgsFeature& f )
+bool QgsCachedFeatureIterator::fetchFeature( QgsFeature &f )
 {
-  mFeatureIdIterator++;
+  f.setValid( false );
 
-  if ( mFeatureIdIterator == mFeatureIds.end() )
-  {
+  if ( mClosed )
     return false;
-  }
-  else
+
+  while ( mFeatureIdIterator != mFeatureIds.constEnd() )
   {
+    if ( !mVectorLayerCache->mCache.contains( *mFeatureIdIterator ) )
+    {
+      ++mFeatureIdIterator;
+      continue;
+    }
+
     f = QgsFeature( *mVectorLayerCache->mCache[*mFeatureIdIterator]->feature() );
-    return true;
+    ++mFeatureIdIterator;
+    if ( mRequest.acceptFeature( f ) )
+    {
+      f.setValid( true );
+      geometryToDestinationCrs( f, mTransform );
+      return true;
+    }
   }
+  close();
+  return false;
 }
 
 bool QgsCachedFeatureIterator::rewind()
 {
-  mFeatureIdIterator = mFeatureIds.begin();
+  mFeatureIdIterator = mFeatureIds.constBegin();
   return true;
 }
 
 bool QgsCachedFeatureIterator::close()
 {
-  // Nothing to clean...
+  mClosed = true;
+  mFeatureIds.clear();
   return true;
 }
 
-QgsCachedFeatureWriterIterator::QgsCachedFeatureWriterIterator( QgsVectorLayerCache *vlCache, QgsFeatureRequest featureRequest )
-    : QgsAbstractFeatureIterator( featureRequest )
-    , mVectorLayerCache( vlCache )
+QgsCachedFeatureWriterIterator::QgsCachedFeatureWriterIterator( QgsVectorLayerCache *vlCache, const QgsFeatureRequest &featureRequest )
+  : QgsAbstractFeatureIterator( featureRequest )
+  , mVectorLayerCache( vlCache )
 {
-  mFeatIt = vlCache->layer()->getFeatures( featureRequest );
+  if ( mRequest.destinationCrs().isValid() && mRequest.destinationCrs() != mVectorLayerCache->sourceCrs() )
+  {
+    mTransform = QgsCoordinateTransform( mVectorLayerCache->sourceCrs(), mRequest.destinationCrs(), mRequest.transformContext() );
+  }
+  try
+  {
+    mFilterRect = filterRectToSourceCrs( mTransform );
+  }
+  catch ( QgsCsException & )
+  {
+    // can't reproject mFilterRect
+    close();
+    return;
+  }
+  if ( !mFilterRect.isNull() )
+  {
+    // update request to be the unprojected filter rect
+    mRequest.setFilterRect( mFilterRect );
+  }
+
+  mFeatIt = vlCache->layer()->getFeatures( mRequest );
 }
 
-bool QgsCachedFeatureWriterIterator::nextFeature( QgsFeature& f )
+bool QgsCachedFeatureWriterIterator::fetchFeature( QgsFeature &f )
 {
+  if ( mClosed )
+  {
+    f.setValid( false );
+    return false;
+  }
   if ( mFeatIt.nextFeature( f ) )
   {
     // As long as features can be fetched from the provider: Write them to cache
     mVectorLayerCache->cacheFeature( f );
     mFids.insert( f.id() );
+    geometryToDestinationCrs( f, mTransform );
     return true;
   }
   else
@@ -84,5 +163,6 @@ bool QgsCachedFeatureWriterIterator::rewind()
 
 bool QgsCachedFeatureWriterIterator::close()
 {
+  mClosed = true;
   return mFeatIt.close();
 }

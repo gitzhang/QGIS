@@ -15,32 +15,78 @@
 #ifndef QGSPLUGINLAYER_H
 #define QGSPLUGINLAYER_H
 
+#include "qgis_core.h"
 #include "qgsmaplayer.h"
+#include "qgsdataprovider.h"
 
-/** \ingroup core
+/**
+ * \ingroup core
   Base class for plugin layers. These can be implemented by plugins
   and registered in QgsPluginLayerRegistry.
 
   In order to be readable from project files, they should set these attributes in layer DOM node:
    "type" = "plugin"
    "name" = "your_layer_type"
-
-  \note added in v1.5
  */
 class CORE_EXPORT QgsPluginLayer : public QgsMapLayer
 {
     Q_OBJECT
 
   public:
-    QgsPluginLayer( QString layerType, QString layerName = QString() );
+    QgsPluginLayer( const QString &layerType, const QString &layerName = QString() );
+    ~QgsPluginLayer() override;
 
-    /** return plugin layer type (the same as used in QgsPluginLayerRegistry) */
+    /**
+     * Returns a new instance equivalent to this one.
+     * \returns a new layer instance
+     * \since QGIS 3.0
+     */
+    QgsPluginLayer *clone() const override = 0;
+
+    //! Returns plugin layer type (the same as used in QgsPluginLayerRegistry)
     QString pluginLayerType();
 
-    void setExtent( const QgsRectangle &extent );
+    //! Sets extent of the layer
+    void setExtent( const QgsRectangle &extent ) override;
+
+    /**
+     * Set source string. This is used for example in layer tree to show tooltip.
+     * \since QGIS 2.16
+     */
+    void setSource( const QString &source );
+
+    QgsDataProvider *dataProvider() override;
+    const QgsDataProvider *dataProvider() const override SIP_SKIP;
 
   protected:
     QString mPluginLayerType;
+    QgsDataProvider *mDataProvider;
 };
+
+#ifndef SIP_RUN
+///@cond PRIVATE
+
+/**
+ * A minimal data provider for plugin layers
+ */
+class QgsPluginLayerDataProvider : public QgsDataProvider
+{
+    Q_OBJECT
+
+  public:
+    QgsPluginLayerDataProvider( const QString &layerType, const QgsDataProvider::ProviderOptions &providerOptions );
+    void setExtent( const QgsRectangle &extent ) { mExtent = extent; }
+    QgsCoordinateReferenceSystem crs() const override;
+    QString name() const override;
+    QString description() const override;
+    QgsRectangle extent() const override;
+    bool isValid() const override;
+
+  private:
+    QString mName;
+    QgsRectangle mExtent;
+};
+///@endcond
+#endif
 
 #endif // QGSPLUGINLAYER_H

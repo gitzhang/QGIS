@@ -17,49 +17,66 @@
 
 #include "qgshandlebadlayers.h"
 #include "qgisapp.h"
-#include "qgisgui.h"
+#include "qgsauthconfigselect.h"
+#include "qgsdataprovider.h"
+#include "qgsguiutils.h"
 #include "qgsdatasourceuri.h"
 #include "qgslogger.h"
 #include "qgsrasterlayer.h"
 #include "qgsproviderregistry.h"
 #include "qgsmessagebar.h"
+#include "qgssettings.h"
+#include "qgslayertreeregistrybridge.h"
+#include "qgsapplication.h"
+#include "qgsfileutils.h"
 
 #include <QDomDocument>
 #include <QDomElement>
+#include <QFileDialog>
 #include <QPushButton>
+#include <QToolButton>
 #include <QMessageBox>
+#include <QInputDialog>
+#include <QDialogButtonBox>
 #include <QUrl>
+#include <QDir>
+#include <QProgressDialog>
 
-QgsHandleBadLayersHandler::QgsHandleBadLayersHandler()
+void QgsHandleBadLayersHandler::handleBadLayers( const QList<QDomNode> &layers )
 {
-}
+  QgsTemporaryCursorRestoreOverride cursorOverride;
 
-void QgsHandleBadLayersHandler::handleBadLayers( QList<QDomNode> layers, QDomDocument projectDom )
-{
-  QApplication::setOverrideCursor( Qt::ArrowCursor );
-  QgsHandleBadLayers *dialog = new QgsHandleBadLayers( layers, projectDom );
+  QgsHandleBadLayers *dialog = new QgsHandleBadLayers( layers );
+
+  dialog->buttonBox->button( QDialogButtonBox::Ignore )->setToolTip( tr( "Import all unavailable layers unmodified (you can fix them later)." ) );
+  dialog->buttonBox->button( QDialogButtonBox::Ignore )->setText( tr( "Keep Unavailable Layers" ) );
+  dialog->buttonBox->button( QDialogButtonBox::Discard )->setToolTip( tr( "Remove all unavailable layers from the project" ) );
+  dialog->buttonBox->button( QDialogButtonBox::Discard )->setText( tr( "Remove Unavailable Layers" ) );
+  dialog->buttonBox->button( QDialogButtonBox::Discard )->setIcon( QgsApplication::getThemeIcon( QStringLiteral( "/mActionDeleteSelected.svg" ) ) );
 
   if ( dialog->layerCount() < layers.size() )
     QgisApp::instance()->messageBar()->pushMessage(
-      tr( "Handle Bad layers" ),
-      tr( "%1 of %2 bad layers were not fixable." )
+      tr( "Handle unavailable layers" ),
+      tr( "%1 of %2 unavailable layers were not fixable." )
       .arg( layers.size() - dialog->layerCount() )
       .arg( layers.size() ),
-      QgsMessageBar::WARNING, QgisApp::instance()->messageTimeout() );
+      Qgis::Warning, QgisApp::instance()->messageTimeout() );
 
   if ( dialog->layerCount() > 0 )
-    dialog->exec();
+  {
+    if ( dialog->exec() == dialog->Accepted )
+    {
+      emit layersChanged();
+    }
+  }
 
   delete dialog;
-  QApplication::restoreOverrideCursor();
 }
 
-
-QgsHandleBadLayers::QgsHandleBadLayers( const QList<QDomNode> &layers, const QDomDocument &projectDom )
-    : QDialog( QgisApp::instance() )
-    , mLayers( layers )
+QgsHandleBadLayers::QgsHandleBadLayers( const QList<QDomNode> &layers )
+  : QDialog( QgisApp::instance() )
+  , mLayers( layers )
 {
-  Q_UNUSED( projectDom );
   setupUi( this );
 
   mVectorFileFilter = QgsProviderRegistry::instance()->fileVectorFilters();
@@ -68,74 +85,61 @@ QgsHandleBadLayers::QgsHandleBadLayers( const QList<QDomNode> &layers, const QDo
   mBrowseButton = new QPushButton( tr( "Browse" ) );
   buttonBox->addButton( mBrowseButton, QDialogButtonBox::ActionRole );
   mBrowseButton->setDisabled( true );
+  mAutoFindButton = new QPushButton( tr( "Auto-Find" ) );
+  mAutoFindButton->setToolTip( tr( "Attempts to automatically find the layers based on the file name (can be slow)." ) );
+  buttonBox->addButton( mAutoFindButton, QDialogButtonBox::ActionRole );
+  mApplyButton = new QPushButton( tr( "Apply Changes" ) );
+  mApplyButton->setToolTip( tr( "Apply fixes to unavailable layers (remaining unavailable layers will be removed from the project)." ) );
+  buttonBox->addButton( mApplyButton, QDialogButtonBox::ActionRole );
 
-  connect( mLayerList, SIGNAL( itemSelectionChanged() ), this, SLOT( selectionChanged() ) );
-  connect( mLayerList, SIGNAL( itemChanged( QTableWidgetItem * ) ), this, SLOT( itemChanged( QTableWidgetItem * ) ) );
-  connect( mLayerList, SIGNAL( cellDoubleClicked( int, int ) ), this, SLOT( cellDoubleClicked( int, int ) ) );
-  connect( mBrowseButton, SIGNAL( clicked() ), this, SLOT( browseClicked() ) );
+  connect( mLayerList, &QTableWidget::itemSelectionChanged, this, &QgsHandleBadLayers::selectionChanged );
+  connect( mBrowseButton, &QAbstractButton::clicked, this, &QgsHandleBadLayers::browseClicked );
+  connect( mApplyButton, &QAbstractButton::clicked, this, &QgsHandleBadLayers::apply );
+  connect( mAutoFindButton, &QAbstractButton::clicked, this, &QgsHandleBadLayers::autoFind );
+  connect( buttonBox->button( QDialogButtonBox::Ignore ), &QPushButton::clicked, this, &QgsHandleBadLayers::reject );
+  connect( buttonBox->button( QDialogButtonBox::Discard ), &QPushButton::clicked, this, &QgsHandleBadLayers::accept );
 
   mLayerList->clear();
   mLayerList->setSortingEnabled( true );
   mLayerList->setSelectionBehavior( QAbstractItemView::SelectRows );
   mLayerList->setColumnCount( 5 );
+  mLayerList->setColumnWidth( 3, 75 );
 
   mLayerList->setHorizontalHeaderLabels( QStringList()
                                          << tr( "Layer name" )
                                          << tr( "Type" )
                                          << tr( "Provider" )
-                                         << tr( "New file" )
-                                         << tr( "New datasource" )
+                                         << tr( "Auth config" )
+                                         << tr( "Datasource" )
                                        );
+
+  mLayerList->horizontalHeader()->setSectionsMovable( true );
+  mLayerList->horizontalHeader()->setSectionResizeMode( QHeaderView::Interactive );
 
   int j = 0;
   for ( int i = 0; i < mLayers.size(); i++ )
   {
     const QDomNode &node = mLayers[i];
 
-    QString name = node.namedItem( "layername" ).toElement().text();
-    QString type = node.toElement().attribute( "type" );
-    QString datasource = node.namedItem( "datasource" ).toElement().text();
-    QString provider;
+    QString name = node.namedItem( QStringLiteral( "layername" ) ).toElement().text();
+    QString type = node.toElement().attribute( QStringLiteral( "type" ) );
+    QString id = node.namedItem( QStringLiteral( "id" ) ).toElement().text();
+    QString datasource = node.namedItem( QStringLiteral( "datasource" ) ).toElement().text();
+    QString provider = node.namedItem( QStringLiteral( "provider" ) ).toElement().text();
+    QString vectorProvider = type == QLatin1String( "vector" ) ? provider : tr( "none" );
+    bool providerFileBased = ( provider == QStringLiteral( "gdal" ) || provider == QStringLiteral( "ogr" ) || provider == QStringLiteral( "mdal" ) );
+    const QString basepath = QFileInfo( datasource ).absolutePath();
+    mOriginalFileBase[name].append( basepath );
 
-    QString filename = datasource;
-
-    if ( type == "vector" )
-    {
-      provider = node.namedItem( "provider" ).toElement().text();
-      if ( provider == "spatialite" )
-      {
-        QgsDataSourceURI uri( datasource );
-        filename = uri.database();
-      }
-      else if ( provider == "ogr" )
-      {
-        QStringList theURIParts = datasource.split( "|" );
-        filename = theURIParts[0];
-      }
-      else if ( provider == "delimitedtext" )
-      {
-        filename = QUrl::fromEncoded( datasource.toAscii() ).toLocalFile();
-      }
-      else if ( provider == "postgres" || provider == "sqlanywhere" )
-      {
-        continue;
-      }
-    }
-    else
-    {
-      provider = tr( "none" );
-    }
-
-    QgsDebugMsg( QString( "name=%1 type=%2 provider=%3 filename=%4 datasource='%5'" )
-                 .arg( name )
-                 .arg( type )
-                 .arg( provider )
-                 .arg( filename )
-                 .arg( datasource ) );
+    QgsDebugMsg( QStringLiteral( "name=%1 type=%2 provider=%3 datasource='%4'" )
+                 .arg( name,
+                       type,
+                       vectorProvider,
+                       datasource ) );
 
     mLayerList->setRowCount( j + 1 );
 
-    QTableWidgetItem *item;
+    QTableWidgetItem *item = nullptr;
 
     item = new QTableWidgetItem( name );
     item->setData( Qt::UserRole + 0, i );
@@ -143,203 +147,348 @@ QgsHandleBadLayers::QgsHandleBadLayers( const QList<QDomNode> &layers, const QDo
     mLayerList->setItem( j, 0, item );
 
     item = new QTableWidgetItem( type );
+    item->setData( Qt::UserRole + 0, providerFileBased );
     item->setFlags( item->flags() & ~Qt::ItemIsEditable );
     mLayerList->setItem( j, 1, item );
 
-    item = new QTableWidgetItem( provider );
+    item = new QTableWidgetItem( vectorProvider );
     item->setFlags( item->flags() & ~Qt::ItemIsEditable );
     mLayerList->setItem( j, 2, item );
 
-    item = new QTableWidgetItem( filename );
-    mLayerList->setItem( j, 3, item );
+    if ( QgsAuthConfigUriEdit::hasConfigId( datasource ) )
+    {
+      QToolButton *btn = new QToolButton( this );
+      btn->setMaximumWidth( 75 );
+      btn->setMinimumHeight( 24 );
+      btn->setText( tr( "Edit" ) );
+      btn->setProperty( "row", j );
+      connect( btn, &QAbstractButton::clicked, this, &QgsHandleBadLayers::editAuthCfg );
+      mLayerList->setCellWidget( j, 3, btn );
+    }
+    else
+    {
+      item = new QTableWidgetItem( QString() );
+      mLayerList->setItem( j, 3, item );
+    }
 
     item = new QTableWidgetItem( datasource );
-    item->setFlags( item->flags() & ~Qt::ItemIsEditable );
     mLayerList->setItem( j, 4, item );
 
     j++;
   }
 
-  mLayerList->resizeColumnsToContents();
-}
-
-QgsHandleBadLayers::~QgsHandleBadLayers()
-{
-}
-
-void QgsHandleBadLayers::itemChanged( QTableWidgetItem *item )
-{
-  if ( item->column() != 3 )
-    return;
-
-  QFileInfo fi( item->text() );
-
-  item->setForeground( fi.exists() ? QBrush( Qt::green ) : QBrush( Qt::red ) );
-}
-
-void QgsHandleBadLayers::cellDoubleClicked( int row, int column )
-{
-  Q_UNUSED( row );
-  if ( column != 3 || !mBrowseButton->isEnabled() )
-    return;
-
-  mBrowseButton->click();
+  // mLayerList->resizeColumnsToContents();
 }
 
 void QgsHandleBadLayers::selectionChanged()
 {
-  QgsDebugMsg( "entered." );
 
   mRows.clear();
 
-  foreach ( QTableWidgetItem *item, mLayerList->selectedItems() )
+  const auto constSelectedItems = mLayerList->selectedItems();
+  for ( QTableWidgetItem *item : constSelectedItems )
   {
     if ( item->column() != 0 )
+      continue;
+
+    bool providerFileBased = mLayerList->item( item->row(), 1 )->data( Qt::UserRole + 0 ).toBool();
+    if ( !providerFileBased )
       continue;
 
     mRows << item->row();
   }
 
-  mBrowseButton->setEnabled( mRows.size() > 0 );
+  mBrowseButton->setEnabled( !mRows.isEmpty() );
+}
+
+QString QgsHandleBadLayers::filename( int row )
+{
+  QString type = mLayerList->item( row, 1 )->text();
+  QString provider = mLayerList->item( row, 2 )->text();
+  QString datasource = mLayerList->item( row, 4 )->text();
+
+  if ( type == QLatin1String( "vector" ) )
+  {
+    const QVariantMap parts = QgsProviderRegistry::instance()->decodeUri( provider, datasource );
+    // if parts is empty then provider doesn't handle this method!
+    return parts.empty() ? datasource : parts.value( QStringLiteral( "path" ) ).toString();
+  }
+  else
+  {
+    return datasource;
+  }
+}
+
+void QgsHandleBadLayers::setFilename( int row, const QString &filename )
+{
+  if ( !QFileInfo::exists( filename ) )
+    return;
+
+  QString type = mLayerList->item( row, 1 )->text();
+  QString provider = mLayerList->item( row, 2 )->text();
+  QTableWidgetItem *item = mLayerList->item( row, 4 );
+
+  QString datasource = item->text();
+
+  if ( type == QLatin1String( "vector" ) )
+  {
+    if ( provider == QLatin1String( "spatialite" ) )
+    {
+      QgsDataSourceUri uri( datasource );
+      uri.setDatabase( filename );
+      datasource = uri.uri();
+    }
+    else if ( provider == QLatin1String( "ogr" ) )
+    {
+      QStringList theURIParts = datasource.split( '|' );
+      theURIParts[0] = filename;
+      datasource = theURIParts.join( QStringLiteral( "|" ) );
+    }
+    else if ( provider == QLatin1String( "delimitedtext" ) )
+    {
+      QUrl uriSource = QUrl::fromEncoded( datasource.toLatin1() );
+      QUrl uriDest = QUrl::fromLocalFile( filename );
+      uriDest.setQuery( QUrlQuery( uriSource ) );
+      datasource = QString::fromLatin1( uriDest.toEncoded() );
+    }
+  }
+  else
+  {
+    datasource = filename;
+  }
+
+  item->setText( datasource );
 }
 
 void QgsHandleBadLayers::browseClicked()
 {
-  QgsDebugMsg( "entered." );
 
   if ( mRows.size() == 1 )
   {
-    QString memoryQualifier;
-    QString fileFilter;
-    int idx = mLayerList->item( mRows[0], 0 )->data( Qt::UserRole ).toInt();
-    QTableWidgetItem *fileItem = mLayerList->item( mRows[0], 3 );
+    int row = mRows.at( 0 );
+    QString type = mLayerList->item( row, 1 )->text();
 
-    if ( mLayers[ idx ].toElement().attribute( "type" ) == "vector" )
+    QString memoryQualifier, fileFilter;
+    if ( type == QLatin1String( "vector" ) )
     {
-      memoryQualifier = "lastVectorFileFilter";
+      memoryQualifier = QStringLiteral( "lastVectorFileFilter" );
       fileFilter = mVectorFileFilter;
     }
     else
     {
-      memoryQualifier = "lastRasterFileFilter";
+      memoryQualifier = QStringLiteral( "lastRasterFileFilter" );
       fileFilter = mRasterFileFilter;
     }
 
+    QString fn = filename( row );
+    if ( fn.isNull() )
+      return;
+
     QStringList selectedFiles;
     QString enc;
-    QString title = tr( "Select file to replace '%1'" ).arg( fileItem->text() );
+    QString title = tr( "Select File to Replace '%1'" ).arg( fn );
 
-    QgisGui::openFilesRememberingFilter( memoryQualifier, fileFilter, selectedFiles, enc, title );
-
+    QgsGuiUtils::openFilesRememberingFilter( memoryQualifier, fileFilter, selectedFiles, enc, title );
     if ( selectedFiles.size() != 1 )
     {
       QMessageBox::information( this, title, tr( "Please select exactly one file." ) );
       return;
     }
 
-    fileItem->setText( selectedFiles[0] );
+    setFilename( row, selectedFiles[0] );
   }
   else if ( mRows.size() > 1 )
   {
-    QStringList selectedFiles;
-    QString enc;
-    QString title = tr( "Select new directory of selected files" );
+    QString title = tr( "Select New Directory of Selected Files" );
 
-    QgisGui::openFilesRememberingFilter( "missingDirectory", tr( "All files (*)" ), selectedFiles, enc, title );
-
-    if ( selectedFiles.isEmpty() )
+    QgsSettings settings;
+    QString lastDir = settings.value( QStringLiteral( "UI/missingDirectory" ), QDir::homePath() ).toString();
+    QString selectedFolder = QFileDialog::getExistingDirectory( this, title, lastDir );
+    if ( selectedFolder.isEmpty() )
     {
       return;
     }
 
-    QFileInfo path( selectedFiles[0] );
-    if ( !path.exists() )
+    QDir dir( selectedFolder );
+    if ( !dir.exists() )
     {
       return;
     }
 
-    foreach ( int i, mRows )
+    const auto constMRows = mRows;
+    for ( int row : constMRows )
     {
-      QTableWidgetItem *fileItem = mLayerList->item( i, 3 );
+      bool providerFileBased = mLayerList->item( row, 1 )->data( Qt::UserRole + 0 ).toBool();
+      if ( !providerFileBased )
+        continue;
 
-      QFileInfo fi( fileItem->text() );
-      fi.setFile( path.dir(), fi.fileName() );
+      QString fn = filename( row );
+      if ( fn.isEmpty() )
+        continue;
 
+      QFileInfo fi( fn );
+      fi.setFile( dir, fi.fileName() );
       if ( !fi.exists() )
         continue;
 
-      fileItem->setText( fi.absoluteFilePath() );
+      setFilename( row, fi.absoluteFilePath() );
     }
   }
 }
 
+void QgsHandleBadLayers::editAuthCfg()
+{
+  QToolButton *btn = qobject_cast<QToolButton *>( sender() );
+  int row = -1;
+  for ( int i = 0; i < mLayerList->rowCount(); i++ )
+  {
+    if ( mLayerList->cellWidget( i, 3 ) == btn )
+    {
+      row = i;
+      break;
+    }
+  }
+
+  if ( row == -1 )
+    return;
+
+  QString provider = mLayerList->item( row, 2 )->text();
+  if ( provider == QLatin1String( "none" ) )
+    provider.clear();
+
+  QString prevuri = mLayerList->item( row, 4 )->text();
+
+  QgsAuthConfigUriEdit *dlg = new QgsAuthConfigUriEdit( this, prevuri, provider );
+  dlg->setWindowModality( Qt::WindowModal );
+  dlg->resize( 500, 500 );
+  if ( dlg->exec() )
+  {
+    QString newuri( dlg->dataSourceUri() );
+    if ( newuri != prevuri )
+    {
+      mLayerList->item( row, 4 )->setText( newuri );
+    }
+  }
+  dlg->deleteLater();
+}
+
 void QgsHandleBadLayers::apply()
 {
-  QgsDebugMsg( "entered." );
+  QgsProject::instance()->layerTreeRegistryBridge()->setEnabled( true );
+  QDir::setCurrent( QgsProject::instance()->absolutePath() );
   for ( int i = 0; i < mLayerList->rowCount(); i++ )
   {
     int idx = mLayerList->item( i, 0 )->data( Qt::UserRole ).toInt();
     QDomNode &node = const_cast<QDomNode &>( mLayers[ idx ] );
 
-    QString type = mLayerList->item( i, 1 )->text();
-    QString provider = mLayerList->item( i, 2 )->text();
-    QTableWidgetItem *fileItem = mLayerList->item( i, 3 );
-    QString datasource = mLayerList->item( i, 4 )->text();
-
-    QString filename = fileItem->text();
-    if ( !QFileInfo( filename ).exists() )
+    QTableWidgetItem *item = mLayerList->item( i, 4 );
+    QString datasource = item->text();
+    QString fileName;
+    const QString layerId { node.namedItem( QStringLiteral( "id" ) ).toElement().text() };
+    const QString name { mLayerList->item( i, 0 )->text() };
+    const QFileInfo dataInfo = QFileInfo( datasource );
+    const QString basepath = dataInfo.absoluteDir().path();
+    const QString longName = dataInfo.fileName();
+    QString provider = node.namedItem( QStringLiteral( "provider" ) ).toElement().text();
+    const QString fileType = mLayerList->item( i, 2 )->text();
+    if ( provider.toLower().toStdString() == "none" )
     {
-      continue;
+      if ( fileType.toStdString() == "raster" )
+        provider = QStringLiteral( "gdal" );
+      else if ( fileType.toStdString() == "vector" )
+        provider = QStringLiteral( "ogr" );
+      else if ( fileType.contains( "mesh", Qt::CaseInsensitive ) )
+        provider = QStringLiteral( "mdal" );
     }
 
-    if ( type == "vector" )
-    {
-      if ( provider == "spatialite" )
-      {
-        QgsDataSourceURI uri( datasource );
-        uri.setDatabase( filename );
-        datasource = uri.uri();
-      }
-      else if ( provider == "ogr" )
-      {
-        QStringList theURIParts = datasource.split( "|" );
-        theURIParts[0] = filename;
-        datasource = theURIParts.join( "|" );
-      }
-      else if ( provider == "delimitedtext" )
-      {
-        QUrl uriSource = QUrl::fromEncoded( datasource.toAscii() );
-        QUrl uriDest = QUrl::fromLocalFile( filename );
-        uriDest.setQueryItems( uriSource.queryItems() );
-        datasource = QString::fromAscii( uriDest.toEncoded() );
-      }
-    }
+    QVariantMap providerMap = QgsProviderRegistry::instance()->decodeUri( provider, dataInfo.absoluteFilePath() );
+    if ( providerMap.contains( QStringLiteral( "path" ) ) )
+      fileName = QFileInfo( providerMap[ QStringLiteral( "path" ) ].toString() ).fileName();
     else
     {
-      datasource = filename;
+      fileName = longName;
+    }
+    if ( item->data( Qt::UserRole + 2 ).isValid() )
+    {
+      if ( item->data( Qt::UserRole + 2 ).toBool() )
+        datasource = QDir::toNativeSeparators( checkBasepath( layerId, datasource, fileName ).replace( fileName, longName ) );
     }
 
-    node.namedItem( "datasource" ).toElement().firstChild().toText().setData( datasource );
-    if ( QgsProject::instance()->read( node ) )
+    bool dataSourceChanged { false };
+
+
+    // Try first to change the datasource of the existing layers, this will
+    // maintain the current status (checked/unchecked) and group
+    if ( QgsProject::instance()->mapLayer( layerId ) )
+    {
+      QgsDataProvider::ProviderOptions options;
+      QgsMapLayer *mapLayer = QgsProject::instance()->mapLayer( layerId );
+      if ( mapLayer )
+      {
+        QString subsetString;
+        QgsVectorLayer *vlayer = qobject_cast< QgsVectorLayer *>( mapLayer );
+        if ( vlayer )
+        {
+          // store the previous layer subset string, so we can restore after fixing the data source
+          subsetString = vlayer->subsetString();
+        }
+
+        mapLayer->setDataSource( datasource, name, provider, options );
+        dataSourceChanged = mapLayer->isValid();
+
+        if ( dataSourceChanged && vlayer && !subsetString.isEmpty() )
+        {
+          vlayer->setSubsetString( subsetString );
+        }
+      }
+    }
+
+    // If the data source was changed successfully, remove the bad layer from the dialog
+    // otherwise, try to set the new datasource in the XML node and reload the layer,
+    // finally marks with red all remaining bad layers.
+    if ( dataSourceChanged )
     {
       mLayerList->removeRow( i-- );
     }
     else
     {
-      fileItem->setForeground( QBrush( Qt::red ) );
+      node.namedItem( QStringLiteral( "datasource" ) ).toElement().firstChild().toText().setData( datasource );
+      if ( QgsProject::instance()->readLayer( node ) )
+      {
+        mLayerList->removeRow( i-- );
+      }
+      else
+      {
+        item->setForeground( QBrush( Qt::red ) );
+      }
     }
   }
+
+  // Final cleanup: remove any bad layer (none should remain by now)
+  if ( mLayerList->rowCount() == 0 )
+  {
+    QList<QgsMapLayer *> toRemove;
+    const auto mapLayers = QgsProject::instance()->mapLayers();
+    for ( const auto &l : mapLayers )
+    {
+      if ( ! l->isValid() )
+        toRemove << l;
+    }
+    QgsProject::instance()->removeMapLayers( toRemove );
+    accept();
+  }
+
+  QgsProject::instance()->layerTreeRegistryBridge()->setEnabled( false );
+
 }
 
 void QgsHandleBadLayers::accept()
 {
-  QgsDebugMsg( "entered." );
-  apply();
 
   if ( mLayerList->rowCount() > 0  &&
        QMessageBox::warning( this,
                              tr( "Unhandled layer will be lost." ),
-                             tr( "There are still %n unhandled layer(s), that will be lost if you closed now.",
+                             tr( "There are still %n unhandled layer(s). If they are not fixed, they will be disabled/deactivated until the project is opened again.",
                                  "unhandled layers",
                                  mLayerList->rowCount() ),
                              QMessageBox::Ok | QMessageBox::Cancel,
@@ -347,30 +496,183 @@ void QgsHandleBadLayers::accept()
   {
     return;
   }
+  QList<QgsMapLayer *> toRemove;
+  for ( const auto &l : QgsProject::instance()->mapLayers( ) )
+  {
+    if ( ! l->isValid() )
+      toRemove << l;
+  }
+  QgsProject::instance()->layerTreeRegistryBridge()->setEnabled( true );
+  QgsProject::instance()->removeMapLayers( toRemove );
+  QgsProject::instance()->layerTreeRegistryBridge()->setEnabled( false );
+  mLayerList->clear();
 
   QDialog::accept();
-}
-
-void QgsHandleBadLayers::rejected()
-{
-  QgsDebugMsg( "entered." );
-
-  if ( mLayerList->rowCount() > 0  &&
-       QMessageBox::warning( this,
-                             tr( "Unhandled layer will be lost." ),
-                             tr( "There are still %n unhandled layer(s), that will be lost if you closed now.",
-                                 "unhandled layers",
-                                 mLayerList->rowCount() ),
-                             QMessageBox::Ok | QMessageBox::Cancel,
-                             QMessageBox::Cancel ) == QMessageBox::Cancel )
-  {
-    return;
-  }
-
-  QDialog::reject();
 }
 
 int QgsHandleBadLayers::layerCount()
 {
   return mLayerList->rowCount();
 }
+
+QString QgsHandleBadLayers::checkBasepath( const QString &layerId, const QString &newPath, const QString &fileName )
+{
+  const QString originalBase = mOriginalFileBase.value( layerId );
+  const QFileInfo newpathInfo = QFileInfo( newPath );
+  if ( newpathInfo.exists() && newpathInfo.isFile() )
+  {
+    const QString newBasepath = newpathInfo.absoluteDir().path();
+    if ( !mAlternativeBasepaths.value( originalBase ).contains( newBasepath ) )
+      mAlternativeBasepaths[ originalBase ].append( newBasepath );
+    return ( newPath );
+  }
+  else if ( mAlternativeBasepaths.contains( originalBase ) )
+  {
+    const QStringList altPaths = mAlternativeBasepaths.value( originalBase );
+    for ( const QString &altPath : altPaths )
+    {
+      if ( QFileInfo::exists( altPath + fileName ) && QFileInfo( altPath + fileName ).isFile() )
+        return ( altPath + fileName );
+    }
+  }
+  return ( mOriginalFileBase.value( layerId ) );
+}
+
+void QgsHandleBadLayers::autoFind()
+{
+  QDir::setCurrent( QgsProject::instance()->absolutePath() );
+  QgsProject::instance()->layerTreeRegistryBridge()->setEnabled( true );
+
+  QList<int> layersToFind;
+  if ( mRows.size() > 0 )
+    layersToFind = mRows;
+  else
+  {
+    for ( int i = 0; i < mLayerList->rowCount(); i++ )
+      layersToFind.append( i );
+  }
+
+  const QList<int> constLayersToFind = layersToFind;
+
+  QProgressDialog progressDialog( QObject::tr( "Searching files" ), 0, 1, layersToFind.size(), this, Qt::Dialog );
+
+  for ( int i : constLayersToFind )
+  {
+    int idx = mLayerList->item( i, 0 )->data( Qt::UserRole ).toInt();
+    QDomNode &node = const_cast<QDomNode &>( mLayers[ idx ] );
+
+    QTableWidgetItem *item = mLayerList->item( i, 4 );
+    QString datasource = item->text();
+    QString fileName;
+    const QString layerId { node.namedItem( QStringLiteral( "id" ) ).toElement().text() };
+    const QString name { mLayerList->item( i, 0 )->text() };
+    const QFileInfo dataInfo = QFileInfo( datasource );
+    const QString basepath = dataInfo.absoluteDir().path();
+    const QString longName = dataInfo.fileName();
+    QString provider = node.namedItem( QStringLiteral( "provider" ) ).toElement().text();
+    const QString fileType = mLayerList->item( i, 2 )->text();
+
+    progressDialog.setValue( i );
+    QChar sentenceEnd = ( name.length() > 15 ) ? QChar( 0x2026 ) : '.';
+    progressDialog.setLabelText( QObject::tr( "Searching for file: %1 \n [ %2 of %3 ] " ).arg( name.left( 15 ) + sentenceEnd,
+                                 QString::number( i + 1 ), QString::number( layersToFind.size() ) ) );
+    progressDialog.open();
+
+    if ( provider.toLower() == QStringLiteral( "none" ) )
+    {
+      if ( fileType == QStringLiteral( "raster" ) )
+        provider = QStringLiteral( "gdal" );
+      else if ( fileType == QStringLiteral( "vector" ) )
+        provider = QStringLiteral( "ogr" );
+      else if ( fileType.contains( "mesh", Qt::CaseInsensitive ) )
+        provider = QStringLiteral( "mdal" );
+    }
+    QVariantMap providerMap = QgsProviderRegistry::instance()->decodeUri( provider, dataInfo.absoluteFilePath() );
+    if ( providerMap.contains( QStringLiteral( "path" ) ) )
+      fileName = QFileInfo( providerMap[ QStringLiteral( "path" ) ].toString() ).fileName();
+    else
+    {
+      item->setForeground( QBrush( Qt::red ) );
+      continue;
+    }
+
+    datasource = QDir::toNativeSeparators( checkBasepath( layerId, basepath, fileName ) );
+
+    bool dataSourceChanged { false };
+
+    // Try first to change the datasource of the existing layers, this will
+    // maintain the current status (checked/unchecked) and group
+    if ( !datasource.isEmpty() && QgsProject::instance()->mapLayer( layerId ) )
+    {
+      QgsDataProvider::ProviderOptions options;
+      QgsMapLayer *mapLayer = QgsProject::instance()->mapLayer( layerId );
+      if ( mapLayer )
+      {
+        mapLayer->setDataSource( datasource.replace( fileName, longName ), name, provider, options );
+        dataSourceChanged = mapLayer->isValid();
+      }
+    }
+
+    if ( !dataSourceChanged )
+    {
+      QStringList filesFound = QgsFileUtils::findFile( fileName, basepath, 5 );
+      if ( filesFound.length() > 1 )
+      {
+        bool ok;
+        datasource = QInputDialog::getItem( nullptr, QObject::tr( "Select layer source" ), QObject::tr( "Many files were found, please select the source for %1 " ).arg( fileName ), filesFound, 0, false, &ok, Qt::Popup );
+        if ( !ok )
+          datasource = filesFound.at( 0 );
+      }
+      else
+      {
+        QString tdatasource = filesFound.length() == 1 ? filesFound.at( 0 ) : QString();
+        if ( !tdatasource.isEmpty() )
+          datasource = tdatasource;
+      }
+
+      datasource = QDir::toNativeSeparators( datasource );
+      if ( QgsProject::instance()->mapLayer( layerId ) && !( datasource.isEmpty() ) )
+      {
+        QgsDataProvider::ProviderOptions options;
+        QgsMapLayer *mapLayer = QgsProject::instance()->mapLayer( layerId );
+        if ( mapLayer )
+        {
+          mapLayer->setDataSource( datasource.replace( fileName, longName ), name, provider, options );
+          dataSourceChanged = mapLayer->isValid();
+        }
+      }
+      if ( dataSourceChanged )
+      {
+        const QString altBasepath = QFileInfo( datasource ).absoluteDir().path();
+        checkBasepath( layerId, altBasepath, fileName );
+      }
+    }
+
+    // If the data source was changed successfully, remove the bad layer from the dialog
+    // otherwise, try to set the new datasource in the XML node and reload the layer,
+    // finally marks with red all remaining bad layers.
+    if ( dataSourceChanged )
+    {
+      setFilename( i, datasource );
+      item->setForeground( QBrush( Qt::green ) );
+      item->setData( Qt::UserRole + 2, QVariant( true ) );
+    }
+    else
+    {
+      node.namedItem( QStringLiteral( "datasource" ) ).toElement().firstChild().toText().setData( datasource );
+      if ( QgsProject::instance()->readLayer( node ) )
+      {
+        mLayerList->removeRow( i-- );
+      }
+      else
+      {
+        item->setForeground( QBrush( Qt::red ) );
+      }
+    }
+
+  }
+
+  QgsProject::instance()->layerTreeRegistryBridge()->setEnabled( false );
+
+}
+

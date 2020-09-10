@@ -7,49 +7,75 @@ SET(ORACLE_SRCS
   qgsoracleprovider.cpp
   qgsoracleconn.cpp
   qgsoracledataitems.cpp
-  qgsoraclesourceselect.cpp
   qgsoraclenewconnection.cpp
+  qgsoracletablecache.cpp
   qgsoracletablemodel.cpp
   qgsoraclecolumntypethread.cpp
   qgsoraclefeatureiterator.cpp
+  qgsoracleconnpool.cpp
+  qgsoracleexpressioncompiler.cpp
+  qgsoracletransaction.cpp
 )
 
-SET(ORACLE_MOC_HDRS
-  qgsoracleprovider.h
-  qgsoracleconn.h
-  qgsoracledataitems.h
-  qgsoraclesourceselect.h
-  qgsoraclenewconnection.h
-  qgsoracletablemodel.h
-  qgsoraclecolumntypethread.h
+IF (WITH_GUI)
+  SET(ORACLE_SRCS ${ORACLE_SRCS}
+    qgsoraclesourceselect.cpp
+  )
+ENDIF ()
+
+SET(ORACLE_HDRS
+  qgsoracleexpressioncompiler.h
 )
 
 
 ########################################################
 # Build
 
-QT4_WRAP_CPP(ORACLE_MOC_SRCS ${ORACLE_MOC_HDRS})
-
 INCLUDE_DIRECTORIES(
-  ../../core
-  ../../gui
+  ${CMAKE_SOURCE_DIR}/src/core
+  ${CMAKE_SOURCE_DIR}/src/core/auth
+  ${CMAKE_SOURCE_DIR}/src/core/expression
+  ${CMAKE_SOURCE_DIR}/src/core/geometry
+  ${CMAKE_SOURCE_DIR}/src/core/metadata
+  ${CMAKE_SOURCE_DIR}/src/core/symbology
+  ${CMAKE_SOURCE_DIR}/src/gui
+  ${CMAKE_SOURCE_DIR}/src/gui/auth
+  ${CMAKE_SOURCE_DIR}/external
+  ${CMAKE_SOURCE_DIR}/external/nlohmann
+
+  ${CMAKE_BINARY_DIR}/src/core
+  ${CMAKE_BINARY_DIR}/src/gui
+  ${CMAKE_BINARY_DIR}/src/ui
+)
+INCLUDE_DIRECTORIES(SYSTEM
   ${GEOS_INCLUDE_DIR}
-  ${CMAKE_CURRENT_BINARY_DIR}/../../ui
   ${QT_QTSQL_INCLUDEDIR}
 )
 
-ADD_LIBRARY (oracleprovider MODULE ${ORACLE_SRCS} ${ORACLE_MOC_SRCS})
+IF (WITH_GUI)
+  INCLUDE_DIRECTORIES(SYSTEM
+    ${QSCINTILLA_INCLUDE_DIR}
+  )
+ENDIF ()
+
+ADD_LIBRARY (oracleprovider MODULE ${ORACLE_SRCS} ${ORACLE_HDRS})
 
 TARGET_LINK_LIBRARIES (oracleprovider
   qgis_core
-  qgis_gui
-  ${QT_QTSQL_LIBRARY}
+  ${Qt5Sql_LIBRARIES}
 )
+
+IF (WITH_GUI)
+  TARGET_LINK_LIBRARIES (oracleprovider
+    qgis_gui
+  )
+  ADD_DEPENDENCIES(oracleprovider ui)
+ENDIF ()
 
 
 ########################################################
 # Install
-                
+
 INSTALL(TARGETS oracleprovider
   RUNTIME DESTINATION ${QGIS_PLUGIN_DIR}
   LIBRARY DESTINATION ${QGIS_PLUGIN_DIR})

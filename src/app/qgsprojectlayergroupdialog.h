@@ -17,36 +17,62 @@
 
 #include "QDialog"
 #include "ui_qgsprojectlayergroupdialogbase.h"
+#include "qgshelp.h"
+#include "qgslayertreemodel.h"
+#include "qgis_app.h"
 
 class QDomElement;
 
-/**A dialog to select layers and groups from a qgs project*/
-class QgsProjectLayerGroupDialog: public QDialog, private Ui::QgsProjectLayerGroupDialogBase
+class QgsLayerTree;
+
+/**
+ * Subclass of QgsLayerTreeModel which overrides font styling
+ * from base model.
+ */
+class QgsEmbeddedLayerTreeModel : public QgsLayerTreeModel
 {
     Q_OBJECT
   public:
-    /**Constructor. If a project file is given, the groups/layers are displayed directly and the file selection hidden*/
-    QgsProjectLayerGroupDialog( QWidget * parent = 0, const QString& projectFile = QString(), Qt::WindowFlags f = 0 );
-    ~QgsProjectLayerGroupDialog();
+
+    /**
+     * Construct a new tree model with given layer tree (root node must not be NULLPTR).
+     * The root node is not transferred by the model.
+     */
+    explicit QgsEmbeddedLayerTreeModel( QgsLayerTree *rootNode, QObject *parent = nullptr );
+
+    QVariant data( const QModelIndex &index, int role = Qt::DisplayRole ) const override;
+};
+
+//! A dialog to select layers and groups from a qgs project
+class APP_EXPORT QgsProjectLayerGroupDialog: public QDialog, private Ui::QgsProjectLayerGroupDialogBase
+{
+    Q_OBJECT
+  public:
+    //! Constructor. If a project file is given, the groups/layers are displayed directly and the file selection hidden
+    QgsProjectLayerGroupDialog( QWidget *parent = nullptr, const QString &projectFile = QString(), Qt::WindowFlags f = nullptr );
+    ~QgsProjectLayerGroupDialog() override;
 
     QStringList selectedGroups() const;
     QStringList selectedLayerIds() const;
     QStringList selectedLayerNames() const;
     QString selectedProjectFile() const;
 
+    bool isValid() const;
+
   private slots:
-    void on_mBrowseFileToolButton_clicked();
-    void on_mProjectFileLineEdit_editingFinished();
-    void on_mTreeWidget_itemSelectionChanged();
-    void on_mButtonBox_accepted();
+    void onTreeViewSelectionChanged();
+    void mButtonBox_accepted();
+    void showHelp();
 
   private:
     void changeProjectFile();
-    void addLegendGroupToTreeWidget( const QDomElement& groupElem, QTreeWidgetItem* parent = 0 );
-    void addLegendLayerToTreeWidget( const QDomElement& layerElem, QTreeWidgetItem* parent = 0 );
-    void unselectChildren( QTreeWidgetItem* item );
+    void removeEmbeddedNodes( QgsLayerTreeGroup *node );
+    void deselectChildren( const QModelIndex &index );
     QString mProjectPath;
-    bool mShowEmbeddedContent;
+    bool mShowEmbeddedContent = false;
+    bool mPresetProjectMode = false;
+
+    QgsLayerTree *mRootGroup = nullptr;
 };
 
 #endif //QGSPROJECTLAYERGROUPDIALOG_H

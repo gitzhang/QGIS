@@ -15,57 +15,46 @@
 #include "qgspythonrunner.h"
 #include "qgslogger.h"
 
-QgsPythonRunner* QgsPythonRunner::mInstance = NULL;
+QgsPythonRunner *QgsPythonRunner::sInstance = nullptr;
 
 ///////////////////////////
 // static methods
 
 bool QgsPythonRunner::isValid()
 {
-  return mInstance != NULL;
+  return nullptr != sInstance;
 }
 
-bool QgsPythonRunner::run( QString command, QString messageOnError )
+bool QgsPythonRunner::run( const QString &command, const QString &messageOnError )
 {
-  if ( mInstance )
+  if ( sInstance )
   {
-    QgsDebugMsg( "Running " + command );
-    return mInstance->runCommand( command, messageOnError );
+    QgsDebugMsgLevel( "Running " + command, 3 );
+    return sInstance->runCommand( command, messageOnError );
   }
   else
   {
-    QgsDebugMsg( "Unable to run Python command: runner not available!" );
+    QgsDebugMsg( QStringLiteral( "Unable to run Python command: runner not available!" ) );
     return false;
   }
 }
 
-bool QgsPythonRunner::eval( QString command, QString& result )
+bool QgsPythonRunner::eval( const QString &command, QString &result )
 {
-  if ( mInstance )
+  if ( sInstance )
   {
-    return mInstance->evalCommand( command, result );
+    return sInstance->evalCommand( command, result );
   }
   else
   {
-    QgsDebugMsg( "Unable to run Python command: runner not available!" );
+    QgsDebugMsg( QStringLiteral( "Unable to run Python command: runner not available!" ) );
     return false;
   }
 }
 
-void QgsPythonRunner::setInstance( QgsPythonRunner* runner )
+void QgsPythonRunner::setInstance( QgsPythonRunner *runner )
 {
-  delete mInstance;
-  mInstance = runner;
+  delete sInstance;
+  sInstance = runner;
 }
 
-///////////////////////////
-// non-static methods
-
-QgsPythonRunner::QgsPythonRunner()
-{
-}
-
-QgsPythonRunner::~QgsPythonRunner()
-{
-
-}

@@ -16,23 +16,33 @@
  ***************************************************************************/
 
 #include "qgsbilinearrasterresampler.h"
+#include "qgsgdalutils.h"
 #include <QImage>
 #include <cmath>
 
-QgsBilinearRasterResampler::QgsBilinearRasterResampler()
-{
-}
-
-QgsBilinearRasterResampler::~QgsBilinearRasterResampler()
-{
-}
-
-QgsRasterResampler * QgsBilinearRasterResampler::clone() const
+QgsBilinearRasterResampler *QgsBilinearRasterResampler::clone() const
 {
   return new QgsBilinearRasterResampler();
 }
 
-void QgsBilinearRasterResampler::resample( const QImage& srcImage, QImage& dstImage )
+int QgsBilinearRasterResampler::tileBufferPixels() const
 {
-  dstImage = srcImage.scaled( dstImage.width(), dstImage.height(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
+  return 1;
+}
+
+Q_NOWARN_DEPRECATED_PUSH
+void QgsBilinearRasterResampler::resample( const QImage &srcImage, QImage &dstImage )
+{
+  dstImage = QgsGdalUtils::resampleImage( srcImage, dstImage.size(), GRIORA_Bilinear );
+}
+Q_NOWARN_DEPRECATED_POP
+
+QImage QgsBilinearRasterResampler::resampleV2( const QImage &source, const QSize &size )
+{
+  return source.scaled( size.width(), size.height(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
+}
+
+QString QgsBilinearRasterResampler::type() const
+{
+  return QStringLiteral( "bilinear" );
 }

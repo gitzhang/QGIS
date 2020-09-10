@@ -16,86 +16,114 @@
 #include "qgsowsdataitems.h"
 #include "qgsowsprovider.h"
 #include "qgslogger.h"
-#include "qgsdatasourceuri.h"
 #include "qgsowsconnection.h"
-#include "qgsnewhttpconnection.h"
+#include "qgsdataitemprovider.h"
 
 #include "qgsapplication.h"
 
 #include <QFileInfo>
 
 // ---------------------------------------------------------------------------
-QgsOWSConnectionItem::QgsOWSConnectionItem( QgsDataItem* parent, QString name, QString path )
-    : QgsDataCollectionItem( parent, name, path )
+QgsOWSConnectionItem::QgsOWSConnectionItem( QgsDataItem *parent, QString name, QString path )
+  : QgsDataCollectionItem( parent, name, path, QStringLiteral( "OWS" ) )
 {
-  mIcon = QgsApplication::getThemeIcon( "mIconConnect.png" );
+  mIconName = QStringLiteral( "mIconConnect.svg" );
+  mCapabilities |= Collapse;
 }
 
-QgsOWSConnectionItem::~QgsOWSConnectionItem()
+QVector<QgsDataItem *> QgsOWSConnectionItem::createChildren()
 {
-}
-
-QVector<QgsDataItem*> QgsOWSConnectionItem::createChildren()
-{
-  QgsDebugMsg( "Entered" );
-  QVector<QgsDataItem*> children;
-  QVector<QgsDataItem*> serviceItems;
+  QVector<QgsDataItem *> children;
+  QHash<QgsDataItem *, QString> serviceItems; // service/provider key
 
   int layerCount = 0;
   // Try to open with WMS,WFS,WCS
-  foreach ( QString key, QStringList() << "wms" << "WFS" << "gdal" )
+  Q_FOREACH ( const QString &key, QStringList() << "wms" << "WFS" << "wcs" )
   {
     QgsDebugMsg( "Add connection for provider " + key );
-    QLibrary *library = QgsProviderRegistry::instance()->providerLibrary( key );
-    if ( !library )
-      continue;
-
-    dataItem_t * dItem = ( dataItem_t * ) cast_to_fptr( library->resolve( "dataItem" ) );
-    if ( !dItem )
+    const QList<QgsDataItemProvider *> providerList = QgsProviderRegistry::instance()->dataItemProviders( key );
+    if ( providerList.isEmpty() )
     {
-      QgsDebugMsg( library->fileName() + " does not have dataItem" );
+      QgsDebugMsg( key + " does not have dataItemProviders" );
       continue;
     }
 
-    QgsDataItem *item = dItem( mPath, this );  // empty path -> top level
-    if ( !item )
-      continue;
+    QString path = key.toLower() + ":/" + name();
+    QgsDebugMsg( "path = " + path );
 
-    item->populate();
-
-    layerCount += item->rowCount();
-    if ( item->rowCount() > 0 )
+    QVector<QgsDataItem *> items;
+    for ( QgsDataItemProvider *pr : providerList )
     {
-      QgsDebugMsg( "Add new item : " + item->name() );
-      serviceItems.append( item );
+      if ( !pr->name().startsWith( key ) )
+        continue;
+
+      items = pr->createDataItems( path, this );
+      if ( !items.isEmpty() )
+      {
+        break;
+      }
     }
-    else
+
+    if ( items.isEmpty() )
     {
-      //delete item;
+      QgsDebugMsg( key + " does not have any data items" );
+      continue;
+    }
+
+    for ( QgsDataItem *item : qgis::as_const( items ) )
+    {
+      item->populate( true ); // populate in foreground - this is already run in a thread
+
+      layerCount += item->rowCount();
+      if ( item->rowCount() > 0 )
+      {
+        QgsDebugMsg( "Add new item : " + item->name() );
+        serviceItems.insert( item, key );
+      }
+      else
+      {
+        //delete item;
+      }
     }
   }
 
-  foreach ( QgsDataItem* item, serviceItems )
+  for ( auto it = serviceItems.constBegin(); it != serviceItems.constEnd(); ++it )
   {
-    QgsDebugMsg( QString( "serviceItems.size = %1 layerCount = %2 rowCount = %3" ).arg( serviceItems.size() ).arg( layerCount ).arg( item->rowCount() ) );
+    QgsDataItem *item = it.key();
+    QgsDebugMsg( QStringLiteral( "serviceItems.size = %1 layerCount = %2 rowCount = %3" ).arg( serviceItems.size() ).arg( layerCount ).arg( item->rowCount() ) );
+    QString providerKey = it.value();
     if ( serviceItems.size() == 1 || layerCount <= 30 || item->rowCount() <= 10 )
     {
       // Add layers directly to OWS connection
-      foreach ( QgsDataItem* subItem, item->children() )
+      const auto constChildren = item->children();
+      for ( QgsDataItem *subItem : constChildren )
       {
         item->removeChildItem( subItem );
         subItem->setParent( this );
+        replacePath( subItem, providerKey.toLower() + ":/", QStringLiteral( "ows:/" ) );
         children.append( subItem );
       }
       delete item;
     }
     else // Add service
     {
+      replacePath( item, item->path(), path() + '/' + providerKey.toLower() );
       children.append( item );
     }
   }
 
   return children;
+}
+
+// reset path recursively
+void QgsOWSConnectionItem::replacePath( QgsDataItem *item, QString before, QString after )
+{
+  item->setPath( item->path().replace( before, after ) );
+  const auto constChildren = item->children();
+  for ( QgsDataItem *subItem : constChildren )
+  {
+    replacePath( subItem, before, after );
+  }
 }
 
 bool QgsOWSConnectionItem::equal( const QgsDataItem *other )
@@ -105,129 +133,43 @@ bool QgsOWSConnectionItem::equal( const QgsDataItem *other )
     return false;
   }
   const QgsOWSConnectionItem *o = dynamic_cast<const QgsOWSConnectionItem *>( other );
-  return ( mPath == o->mPath && mName == o->mName );
-}
-
-QList<QAction*> QgsOWSConnectionItem::actions()
-{
-  QList<QAction*> lst;
-
-  QAction* actionEdit = new QAction( tr( "Edit..." ), this );
-  connect( actionEdit, SIGNAL( triggered() ), this, SLOT( editConnection() ) );
-  lst.append( actionEdit );
-
-  QAction* actionDelete = new QAction( tr( "Delete" ), this );
-  connect( actionDelete, SIGNAL( triggered() ), this, SLOT( deleteConnection() ) );
-  lst.append( actionDelete );
-
-  return lst;
-}
-
-void QgsOWSConnectionItem::editConnection()
-{
-#if 0
-  QgsNewHttpConnection nc( 0, "/Qgis/connections-ows/", mName );
-
-  if ( nc.exec() )
-  {
-    // the parent should be updated
-    mParent->refresh();
-  }
-#endif
-}
-
-void QgsOWSConnectionItem::deleteConnection()
-{
-#if 0
-  QgsOWSConnection::deleteConnection( "OWS", mName );
-  // the parent should be updated
-  mParent->refresh();
-#endif
+  return ( o && mPath == o->mPath && mName == o->mName );
 }
 
 
 // ---------------------------------------------------------------------------
 
 
-QgsOWSRootItem::QgsOWSRootItem( QgsDataItem* parent, QString name, QString path )
-    : QgsDataCollectionItem( parent, name, path )
+QgsOWSRootItem::QgsOWSRootItem( QgsDataItem *parent, QString name, QString path )
+  : QgsConnectionsRootItem( parent, name, path, QStringLiteral( "OWS" ) )
 {
-  mIcon = QgsApplication::getThemeIcon( "mIconOws.svg" );
-
+  mCapabilities |= Fast;
+  mIconName = QStringLiteral( "mIconOws.svg" );
   populate();
 }
 
-QgsOWSRootItem::~QgsOWSRootItem()
+QVector<QgsDataItem *> QgsOWSRootItem::createChildren()
 {
-}
-
-QVector<QgsDataItem*> QgsOWSRootItem::createChildren()
-{
-  QgsDebugMsg( "Entered" );
-  QVector<QgsDataItem*> connections;
+  QVector<QgsDataItem *> connections;
   // Combine all WMS,WFS,WCS connections
-  QMap<QString, QStringList> uris;
-  foreach ( QString service, QStringList() << "WMS" << "WFS" << "WCS" )
+  QStringList connNames;
+  Q_FOREACH ( const QString &service, QStringList() << "WMS" << "WFS" << "WCS" )
   {
-    foreach ( QString connName, QgsOWSConnection::connectionList( service ) )
+    Q_FOREACH ( const QString &connName, QgsOwsConnection::connectionList( service ) )
     {
-      QgsOWSConnection connection( service, connName );
-
-      QString encodedUri = connection.uri().encodedUri();
-      QStringList labels = uris.value( encodedUri );
-      if ( !labels.contains( connName ) )
+      if ( !connNames.contains( connName ) )
       {
-        labels << connName;
+        connNames << connName;
       }
-      uris[encodedUri] = labels;
     }
   }
-  foreach ( QString encodedUri, uris.keys() )
+  const auto constConnNames = connNames;
+  for ( const QString &connName : constConnNames )
   {
-    QgsDataItem * conn = new QgsOWSConnectionItem( this, uris.value( encodedUri ).join( " / " ), encodedUri );
+    QgsDataItem *conn = new QgsOWSConnectionItem( this, connName, "ows:/" + connName );
     connections.append( conn );
   }
   return connections;
-}
-
-QList<QAction*> QgsOWSRootItem::actions()
-{
-  QList<QAction*> lst;
-
-#if 0
-  QAction* actionNew = new QAction( tr( "New Connection..." ), this );
-  connect( actionNew, SIGNAL( triggered() ), this, SLOT( newConnection() ) );
-  lst.append( actionNew );
-#endif
-
-  return lst;
-}
-
-
-QWidget * QgsOWSRootItem::paramWidget()
-{
-#if 0
-  QgsOWSSourceSelect *select = new QgsOWSSourceSelect( 0, 0, true, true );
-  connect( select, SIGNAL( connectionsChanged() ), this, SLOT( connectionsChanged() ) );
-  return select;
-#endif
-  return 0;
-}
-void QgsOWSRootItem::connectionsChanged()
-{
-  refresh();
-}
-
-void QgsOWSRootItem::newConnection()
-{
-#if 0
-  QgsNewHttpConnection nc( 0, "/Qgis/connections-ows/" );
-
-  if ( nc.exec() )
-  {
-    refresh();
-  }
-#endif
 }
 
 
@@ -236,25 +178,21 @@ void QgsOWSRootItem::newConnection()
 static QStringList extensions = QStringList();
 static QStringList wildcards = QStringList();
 
-QGISEXTERN int dataCapabilities()
+QString QgsOwsDataItemProvider::name()
+{
+  return QStringLiteral( "OWS" );
+}
+
+int QgsOwsDataItemProvider::capabilities() const
 {
   return QgsDataProvider::Net;
 }
 
-QGISEXTERN QgsDataItem * dataItem( QString thePath, QgsDataItem* parentItem )
+QgsDataItem *QgsOwsDataItemProvider::createDataItem( const QString &path, QgsDataItem *parentItem )
 {
-  if ( thePath.isEmpty() )
+  if ( path.isEmpty() )
   {
-    return new QgsOWSRootItem( parentItem, "OWS", "ows:" );
+    return new QgsOWSRootItem( parentItem, QStringLiteral( "OWS" ), QStringLiteral( "ows:" ) );
   }
-  return 0;
-}
-
-//QGISEXTERN QgsOWSSourceSelect * selectWidget( QWidget * parent, Qt::WFlags fl )
-QGISEXTERN QDialog * selectWidget( QWidget * parent, Qt::WFlags fl )
-{
-  Q_UNUSED( parent );
-  Q_UNUSED( fl );
-  //return new QgsOWSSourceSelect( parent, fl );
-  return 0;
+  return nullptr;
 }
